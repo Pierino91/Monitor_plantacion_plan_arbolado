@@ -139,12 +139,21 @@ ui <- dashboardPage(
           solidHeader = TRUE,
           width = 12,
           leafletOutput("mapa_arboles", height = "600px")
+        ),
+        box(
+          title = "Fotos",
+          status = "success",
+          solidHeader = TRUE,
+          width = 12,
+          uiOutput("image"),
+          actionButton("previous", "Previous"),
+          actionButton("next", "Next")
         )
       )  
     ),
     bs4TabItem(
       tabName = "evol",
-      h2("Evolución temporal"),
+      h2("Evolución temporal del plantado de árboles"),
       # title = "Plantaciones a lo largo del tiempo",
       # Fila de valueBoxes
       fluidRow(
@@ -168,13 +177,14 @@ ui <- dashboardPage(
       tabName = "especies",
       h2("Especies plantadas"),
       fluidRow(
+        uiOutput("selector_sitio"),
+        tableOutput("datos_filtrados"), 
         box(
           status = "success",
           solidHeader = TRUE,
           width = 12,
           plotlyOutput("grafico_especie", height = "600px")
         )
-        
       )
      )
    )
