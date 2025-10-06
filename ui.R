@@ -24,7 +24,9 @@ ui <- dashboardPage(
       menuItem("Resumen", tabName = "resumen", icon = icon("tree")),
       menuItem("Mapa", tabName = "map", icon = icon("map")),
       menuItem("Evolución temporal", tabName = "evol", icon = icon("chart-simple")),
-      menuItem("Especies plantadas", tabName = "especies", icon = icon("seedling"))
+      menuItem("Especies plantadas", tabName = "especies", icon = icon("seedling")),
+      menuItem("Monitoreo", tabName = "monitor", icon = icon("desktop"))
+      
     )
   ),
   # Cuerpo del dashboard
@@ -145,9 +147,11 @@ ui <- dashboardPage(
           status = "success",
           solidHeader = TRUE,
           width = 12,
-          uiOutput("image"),
+          sliderInput("index_slider", "Seleccionar índice:",
+                      min = 1, max = 10, value = 1, step = 1), # max lo ajustaremos en server
           actionButton("previous", "Previous"),
-          actionButton("next", "Next")
+          actionButton("next", "Next"),
+          uiOutput("image")
         )
       )  
     ),
@@ -186,7 +190,22 @@ ui <- dashboardPage(
           plotlyOutput("grafico_especie", height = "600px")
         )
       )
-     )
+     ),
+    bs4TabItem(
+      tabName = "monitor",
+      h2("Equipo de monitoreo"),
+      fluidRow(
+        # uiOutput("selector_sitio_monitoreo"),
+        box(
+          title = "Tabla de monitoreo",
+          status = "success",
+          solidHeader = TRUE,
+          width = 12,
+          # uiOutput("mensaje_tabla_especies"),
+          reactableOutput("tabla_monitoreo")
+        )  
+      )
+    )
    )
   ),
   
@@ -194,5 +213,13 @@ ui <- dashboardPage(
   footer = bs4DashFooter(left = "Subsecretaría de Ambiente", right = "Paraná, 2023 - 2027")
 )
 
-
+# # install.packages('rsconnect')
+# 
+# library(rsconnect)
+# rsconnect::setAccountInfo(name='secretaria-de-ambiente-y-salud',
+#                           token='59A4D29D0B62C7DC32941F343F767900',
+#                           secret='67dK/Pwf3vnv46IiKiftaxO7xjhg1Sfz8m00TwhY')
+#
+#
+# rsconnect::deployApp(appName="Plan_arbolado_2023_2027") 
 

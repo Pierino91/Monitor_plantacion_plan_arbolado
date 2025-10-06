@@ -25,11 +25,11 @@ function(input, output, session) {
     })
   })
   
-  datos_entradas <- reactive({
+  datos_monitor <- reactive({
     auto_update()  # Actualiza cada vez que el timer se activa
     # Obtener el primer enlace del endpoint
     tryCatch({
-      first_link <- get_data(endpoint_api_entrada)$links$first
+      first_link <- get_data(endpoint_api_monitor)$links$first
       datos <- get_all_entries(first_link)
       
       # Si no es dataframe o viene vacío, devolvés NULL
@@ -45,14 +45,70 @@ function(input, output, session) {
     })
   })
   
-  output$selector_sitio <- renderUI({
-    req(plantaciones_arboles())  
-    datos <- plantaciones_arboles()
-    sitios <- unique(datos$sitio)
-    selectInput("sitio", "Elegí una columna", choices = c("TODAS", sitios))
+  datos_entradas <- reactive({
+    auto_update()  # Actualiza cada vez que el timer se activa
+    # Obtener el primer enlace del endpoint
+    tryCatch({
+      first_link <- get_data(endpoint_api_entrada)$links$first
+      datos <- get_all_entries(first_link)
+      # datos_tec <- get_all_entries(first_link)
+      
+      # Si no es dataframe o viene vacío, devolvés NULL
+      if (is.null(datos) || nrow(datos) == 0) {
+        return(NULL)
+      }
+      
+      return(datos)
+    }, error = function(e) {
+      # Podrías agregar un log o mensaje interno aquí
+      warning("Error al obtener los datos: ", conditionMessage(e))
+      return(NULL)
+    })
   })
   
   # Procesamiento de datos reactivo
+  arboles_monitoreo <- reactive({
+    
+    datos <- datos_monitor()
+    datos_tec <- datos_entradas()
+    
+    # # test
+    # datos <- get_all_entries(endpoint_api)
+    # datos_tec <- get_all_entries(endpoint_api_entrada)
+    
+    
+    if (is.null(datos)) return(NULL)
+    datos_limpios <- 
+    datos %>%
+      merge(datos_tec, by.x ="ec5_branch_owner_uuid", by.y="ec5_uuid") %>%
+      rename_with(~ gsub("^\\d+_", "", .x)) %>%
+      rename(
+        estado = "Semforo_del_estad",
+        obs = "Observacion_del_m",
+        foto_monitoreo = "Foto_del_arbol",
+        presencia  = "El_arbol_est_pres",
+        sitio = "Lugar",
+        agente = "Agente",
+        momento_monitoreo = "created_at.x"
+      ) %>%
+      mutate(
+        momento_monitoreo = ymd_hms(momento_monitoreo, tz = "UTC"),
+        sitio = factor(sitio),
+        obs = as.character(obs),
+        # Imagen miniatura con click → popup
+        foto_monitoreo  = ifelse(foto_monitoreo != "",
+                             paste0(
+                               "<img src='", foto_monitoreo, 
+                               "' width='120' style='cursor:pointer;' 
+              onclick=\"Shiny.setInputValue('foto_click', '", foto_monitoreo, "', {priority: 'event'})\"/>"
+                             ),
+                             ""
+          ),
+      ) %>%
+      select(agente, sitio, estado, obs, foto_monitoreo, presencia, momento_monitoreo)
+      
+  })
+  
   plantaciones_arboles <- reactive({
     datos <- datos_branch()
     datos_tec <- datos_entradas()
@@ -63,7 +119,7 @@ function(input, output, session) {
     
     if (is.null(datos)) return(NULL)
     # datos_limpios <- 
-      datos %>%
+    datos %>%
       merge(datos_tec, by.x ="ec5_branch_owner_uuid", by.y="ec5_uuid") %>%
       rename_with(~ gsub("^\\d+_", "", .x)) %>%
       rename(
@@ -84,7 +140,7 @@ function(input, output, session) {
       ) %>%
       mutate(
         momento_relevado_arbol = ymd_hms(momento_relevado_arbol, tz = "UTC"),
-        fecha_plantado = dmy(fecha_plantado, tz = "UTC"),
+        fecha_plantado = ymd(dmy(fecha_plantado, tz = "UTC")),
         especie = factor(especie),
         lugar_especifico = factor(lugar_especifico),
         altura = as.numeric(altura),
@@ -95,8 +151,19 @@ function(input, output, session) {
       arrange(fecha_plantado, momento_relevado_arbol) %>%
       mutate(ID = row_number())  %>%
       select(agente, sitio, fecha_plantado, latitud, longitud, especie, foto_plantado, lugar_especifico, altura, momento_relevado_arbol, obs,ID)
-      
+    
   })
+  
+  
+  output$selector_sitio <- renderUI({
+    req(plantaciones_arboles())  
+    datos <- plantaciones_arboles()
+    sitios <- unique(datos$sitio)
+    selectInput("sitio", "Elegí una columna", choices = c("TODAS", sitios))
+  })
+  
+  
+  ####  UI #####
   
   output$fecha_max <- renderUI({
     datos <- plantaciones_arboles()
@@ -115,7 +182,7 @@ function(input, output, session) {
     } else {
       "Sin datos"
     }
-    cant_arboles_total
+    # cant_arboles_total
     # tags$h3(style = "font-size: 32px; margin: 0;", cant_arboles_total)
   })
   
@@ -148,13 +215,10 @@ function(input, output, session) {
     datos <- plantaciones_arboles()
     if (is.null(datos)) return(NULL)
     datos |>
+    # datos_limpios |>
       select(fecha_plantado, especie) |>
       filter(!is.na(fecha_plantado)) |>
-      arrange(fecha_plantado) |>
-      mutate(
-        mes = month(fecha_plantado, label = TRUE, abbr = FALSE)
-      ) |>
-      group_by(mes, especie) |>
+      group_by(fecha_plantado, especie) |>
       reframe(n_especies = n())
   })
   
@@ -163,9 +227,11 @@ function(input, output, session) {
     if (is.null(datos)) return(NULL)
     datos |>
       ungroup() |>
-      group_by(mes) |>
+      group_by(fecha_plantado) |>
       reframe(
-        n = sum(n_especies),
+        n = sum(n_especies, na.rm = TRUE),
+        .groups = "drop") |>
+      mutate(
         acumulado = cumsum(n)
       )
   })
@@ -199,10 +265,13 @@ function(input, output, session) {
     datos <- plantaciones_arboles()
     if (is.null(datos)) return(NULL)
     datos |>
-      select(sitio, especie) |>
-      group_by(sitio, especie) |>
+      select(fecha_plantado, sitio, especie) |>
+      group_by(fecha_plantado, sitio, especie) |>
       reframe(Cantidad = n()) |>
-      rename("Especies" = "especie", "Lugar específico" = "sitio")
+      rename("Especies" = "especie", 
+             "Lugar específico" = "sitio",
+             "Fecha" = "fecha_plantado"
+             )
   })
   
   #### Mapa ####
@@ -215,14 +284,58 @@ function(input, output, session) {
       st_as_sf(coords = c("longitud", "latitud"), crs = 4326)
   })
   
+  #### Imagenes ####
+  
+  
   index <- reactiveVal(1)
   
+  # Botones Previous / Next
   observeEvent(input[["previous"]], {
-    index(max(index()-1, 1))
+    index(max(index() - 1, 1))
+    updateSliderInput(session, "index_slider", value = index())
   })
+  
   observeEvent(input[["next"]], {
-    index(min(index()+1, nrow(plantaciones_arboles())))
+    index(min(index() + 1, nrow(plantaciones_arboles())))
+    updateSliderInput(session, "index_slider", value = index())
   })
+  
+  # Cambiar índice cuando se mueva el slider
+  observeEvent(input[["index_slider"]], {
+    index(input[["index_slider"]])
+  })
+  
+  # Ajustar slider cuando cambia dataset
+  observe({
+    n_filas <- nrow(plantaciones_arboles())
+    updateSliderInput(session, "index_slider",
+                      min = 1,
+                      max = n_filas,
+                      value = index(),
+                      step = 1)
+  })
+  
+  
+  
+  
+  
+  # Mostrar imagen
+  # output$image <- renderUI({
+  #   df <- plantaciones_arboles()
+  #   idx <- index()
+  #   
+  #   if (nrow(df) >= idx) {
+  #     # Supongamos que df tiene una columna llamada "imagen" con la ruta o el nombre del archivo
+  #     tags$img(src = df$imagen[idx], width = "100%")
+  #   } else {
+  #     tags$p("No hay imagen disponible")
+  #   }
+  #   
+    # # test
+    #  x <- imgs %>%
+    #    pull(foto_plantado) %>%
+    #    .[1]
+    
   
   output$image <- renderUI({
     
@@ -298,41 +411,58 @@ function(input, output, session) {
         )
     } else {
       plot_ly() |> 
+        # Barras apiladas
         add_bars(
           data = datos_esp,
-          x = ~mes,
+          x = ~fecha_plantado,
           y = ~n_especies,
           color = ~especie,
-          colors = "Set2",
-          name =  ~especie,
-          opacity = 0.7
+          colors = colores,
+          name = ~especie,
+          opacity = 0.7,
+          yaxis = "y"
         ) |>
+        # Línea acumulada (segundo eje)
         add_lines(
           data = datos_tiempo,
-          x = ~mes,
+          x = ~fecha_plantado,
           y = ~acumulado,
           name = "Acumulado",
-          line = list(width = 2, color = 'black')
+          line = list(width = 2, color = 'black'),
+          yaxis = "y2"
         ) |>
+        # Puntos acumulados (segundo eje)
         add_markers(
           data = datos_tiempo,
-          x = ~mes,
+          x = ~fecha_plantado,
           y = ~acumulado,
           name = "Puntos Acumulado",
-          marker = list(size = 6, color = 'black')
+          marker = list(size = 6, color = 'black'),
+          yaxis = "y2"
         ) |>
         layout(
-          xaxis = list(title = "Mes"),
-          yaxis = list(title = "Árboles"),
+          xaxis = list(title = "Fecha"),
+          yaxis = list(title = "Árboles (por especie)"),
+          yaxis2 = list(
+            title = "Acumulado",
+            overlaying = "y",
+            side = "right",
+            showgrid = FALSE
+          ),
+          margin = list(l = 0, r = 80, t = 0, b = 0), # 👈 más margen derecho e izquierdo
           showlegend = FALSE,
-          barmode = 'stack'
+          barmode = 'stack',
+          legend = list(orientation = "h", y = -0.2) # opcional, para ubicar leyenda abajo
         )
     }
     
   })
   
   output$tabla_especies <- renderReactable({
+    
     datos <- plantacion_lugarEspecifico_especies()
+    
+    
     if (is.null(datos) || nrow(datos) == 0) {
       return(NULL)  
     }
@@ -348,7 +478,7 @@ function(input, output, session) {
     }
   })
   
-  # Grafico d eespecies:
+  # Grafico de especies:
   # TODO hacer para filtre de acuerdo al sitio
   
   output$grafico_especie <- renderPlotly({
@@ -379,6 +509,19 @@ function(input, output, session) {
     }
   })
   
+##### Monitoreo ####
 
+  output$tabla_monitoreo <- renderReactable({
+    
+    datos <- arboles_monitoreo()
+    
+    if (is.null(datos) || nrow(datos) == 0) {
+      return(NULL)  
+    }
+    reactable(datos, columns = list(
+      `foto_monitoreo` = colDef(html = TRUE)
+    )
+   )
+  })
 
 }
