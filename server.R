@@ -78,7 +78,7 @@ function(input, output, session) {
     
     
     if (is.null(datos)) return(NULL)
-    datos_limpios <- 
+    # datos_limpios <- 
     datos %>%
       merge(datos_tec, by.x ="ec5_branch_owner_uuid", by.y="ec5_uuid") %>%
       rename_with(~ gsub("^\\d+_", "", .x)) %>%
@@ -96,19 +96,16 @@ function(input, output, session) {
         sitio = factor(sitio),
         obs = as.character(obs),
         # Imagen miniatura con click → popup
-        foto_monitoreo  = ifelse(foto_monitoreo != "",
-                             paste0(
-                               "<img src='", foto_monitoreo, 
-                               "' width='120' style='cursor:pointer;' 
-              onclick=\"Shiny.setInputValue('foto_click', '", foto_monitoreo, "', {priority: 'event'})\"/>"
-                             ),
-                             ""
-          ),
+        foto_monitoreo = ifelse(
+          foto_monitoreo != "",
+          paste0("<img src='", foto_monitoreo, "' width='120' style='cursor:pointer;'/>"),
+          ""
+        )
       ) %>%
       select(agente, sitio, estado, obs, foto_monitoreo, presencia, momento_monitoreo)
       
   })
-  
+
   plantaciones_arboles <- reactive({
     datos <- datos_branch()
     datos_tec <- datos_entradas()
@@ -154,16 +151,32 @@ function(input, output, session) {
     
   })
   
+  ####  UI #####
   
   output$selector_sitio <- renderUI({
-    req(plantaciones_arboles())  
+    req(plantaciones_arboles()) 
+    
     datos <- plantaciones_arboles()
+    
     sitios <- unique(datos$sitio)
-    selectInput("sitio", "Elegí una columna", choices = c("TODAS", sitios))
+    fluidRow(
+      column(8, selectInput("sitio", "Elegí un sitio:", choices = c("TODAS", sitios))),
+      column(4, tags$h4(textOutput("total_arboles")))
+    )  
+    })
+  
+  output$total_arboles <- renderText({
+    req(input$sitio, plantaciones_arboles())
+    datos <- plantaciones_arboles()
+    
+    if (input$sitio == "TODAS") {
+      total <- nrow(datos)
+    } else {
+      total <- sum(datos$sitio == input$sitio, na.rm = TRUE)
+    }
+    paste("Total de árboles:", total)
   })
   
-  
-  ####  UI #####
   
   output$fecha_max <- renderUI({
     datos <- plantaciones_arboles()
@@ -505,8 +518,13 @@ function(input, output, session) {
         color = ~especie,
         textinfo = 'label+percent',
         insidetextorientation = 'radial'
-      ) |> layout(showlegend = FALSE)
+      ) |> layout(showlegend = FALSE,
+                  yaxis = list(title = "Total de árboles") 
+                  
+      ) 
+        
     }
+    
   })
   
 ##### Monitoreo ####
@@ -518,9 +536,32 @@ function(input, output, session) {
     if (is.null(datos) || nrow(datos) == 0) {
       return(NULL)  
     }
-    reactable(datos, columns = list(
-      `foto_monitoreo` = colDef(html = TRUE)
-    )
+    reactable(datos, 
+              rowStyle = function(index) {
+                estado <- datos$estado[index]
+                color <- if (estado == "Saludable") {
+                  "#d4edda"   # verde claro
+                } else if (estado == "Atención urgente") {
+                  "#f8d7da"   # rojo claro
+                } else if (estado == "Con problemas leves") {
+                  "#fff3cd"   # amarillo claro
+                } else {
+                  "white"
+                }
+                list(background = color)
+              },
+      columns = list(
+      `foto_monitoreo` = colDef(name = "Foto", html = TRUE),
+      `agente`= colDef(name = "Agente responsable"),
+      `sitio`= colDef(name = "Lugar"),
+      `estado` = colDef(name = "Estado"),
+      `obs` = colDef(name = "Observación"),
+      `presencia` = colDef(name = "Presencia"),
+      `momento_monitoreo` = colDef(name = "Fecha del Monitoreo")
+    ),
+    bordered = TRUE,
+    highlight = TRUE,
+    striped = TRUE
    )
   })
 
