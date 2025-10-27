@@ -382,8 +382,12 @@ function(input, output, session) {
   
   output$mapa_arboles <- renderLeaflet({
     datos <- mapa_arboles()
+    
     leaflet() %>%
       addTiles() %>%
+      # setView(mean(as.numeric(datos$longitud), na.rm = TRUE), 
+      #         mean(as.numeric(datos$latitud), na.rm = TRUE),
+      #         zoom = 16)%>%
       {
         if (is.null(datos) || nrow(datos) == 0) {
           addPopups(., lng = 0, lat = 0, popup = "Sin datos georreferenciados")
@@ -528,7 +532,131 @@ function(input, output, session) {
   })
   
 ##### Monitoreo ####
-
+  
+  output$selector_sitio_monitor <- renderUI({
+    req(arboles_monitoreo()) 
+    datos <- arboles_monitoreo()
+    datos$sitio <- as.character(datos$sitio)
+    sitios <- unique(datos$sitio)
+    print(sitios)
+  selectInput("sitio_monitor", "Elegí un sitio:", choices = c("TODAS", sitios))
+  })
+  
+  output$Tortas_Presencia <- renderPlotly({
+    req(arboles_monitoreo())
+    req(input$sitio_monitor)
+    
+    if(input$sitio_monitor != "TODAS"){
+      datos <- arboles_monitoreo() %>% 
+        filter(sitio == input$sitio_monitor)%>%
+        select(presencia)%>%
+        group_by(presencia)%>%
+        reframe(n = n())%>%
+        ungroup()%>%
+        mutate(
+          total=sum(n),
+          porc=n/total*100
+        ) 
+    }else{
+      datos <- arboles_monitoreo() %>%
+        select(presencia)%>%
+        group_by(presencia)%>%
+        reframe(n = n())%>%
+        ungroup()%>%
+        mutate(
+          total=sum(n),
+          porc=n/total*100
+        ) 
+    }
+    
+    if (is.null(datos) || nrow(datos) == 0) {
+      plot_ly() |> 
+        layout(
+          annotations = list(
+            text = "Sin datos disponibles",
+            x = 0.5,
+            y = 0.5,
+            showarrow = FALSE,
+            font = list(size = 20)
+          ),
+          xaxis = list(showticklabels = FALSE, zeroline = FALSE),
+          yaxis = list(showticklabels = FALSE, zeroline = FALSE)
+        )
+    } else {
+      # Crear una lista de gráficos (uno por sitio)
+        plot_ly(
+          data =  datos,
+          labels = ~presencia,
+          values = ~n,
+          type = 'pie',
+          text = ~paste0(round(porc, 1), "%"),
+          textposition = 'inside',
+          textinfo = 'label+text',
+          hoverinfo = 'label+percent+value',
+          showlegend = TRUE
+        )
+    }
+    
+  })
+  
+  
+  output$Barras_monitoreo <- renderPlotly({
+    
+    datos <- arboles_monitoreo(
+    )%>%
+      select(sitio, estado)%>%
+      group_by(sitio,estado)%>%
+      reframe(n = n())%>%
+      ungroup()%>%
+      group_by(sitio)%>%
+      mutate(
+        total=sum(n),
+        porc=n/total*100
+      )
+ 
+    
+    
+    if (is.null(datos) || nrow(datos) == 0) {
+    plot_ly() |> 
+      layout(
+        annotations = list(
+          text = "Sin datos disponibles",
+          x = 0.5,
+          y = 0.5,
+          showarrow = FALSE,
+          font = list(size = 20)
+        ),
+        xaxis = list(showticklabels = FALSE, zeroline = FALSE),
+        yaxis = list(showticklabels = FALSE, zeroline = FALSE)
+      )
+  } else {
+    plot_ly(
+      datos,
+      x = ~sitio,
+      y = ~n,
+      type = 'bar',
+      color = ~estado,
+      # text = ~paste0(round(porc, 1), "%"),  # 🔹 etiqueta con porcentaje
+      textposition = 'outside',             # 🔹 texto fuera de la barra
+      hoverinfo = 'text',
+      hovertext = ~paste(
+        "Sitio:", sitio,
+        "<br>Estado:", estado,
+        "<br>Cantidad:", n,
+        "<br>Porcentaje:", round(porc, 1), "%"
+      )
+    ) |> 
+      layout(
+        yaxis = list(title = "Cantidad"),
+        xaxis = list(title = "Sitio"),
+        barmode = 'stack'  # o 'group' si preferís barras separadas
+      )
+  }
+                
+    
+  })
+  
+  
   output$tabla_monitoreo <- renderReactable({
     
     datos <- arboles_monitoreo()

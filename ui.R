@@ -197,6 +197,21 @@ ui <- dashboardPage(
       fluidRow(
         # uiOutput("selector_sitio_monitoreo"),
         box(
+          title = "Gráfico de monitoreo",
+          status = "success",
+          solidHeader = TRUE,
+          width = 12,
+          # uiOutput("mensaje_tabla_especies"),
+          plotlyOutput("Barras_monitoreo", height = "600px")
+        ), 
+        box(
+          uiOutput("selector_sitio_monitor"),
+          status = "success",
+          solidHeader = TRUE,
+          width = 12,
+          plotlyOutput("Tortas_Presencia", height = "600px")
+        ),
+        box(
           title = "Tabla de monitoreo",
           status = "success",
           solidHeader = TRUE,
