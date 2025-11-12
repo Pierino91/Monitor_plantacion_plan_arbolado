@@ -19,15 +19,24 @@ library(plotly)
 library(reactable)
 library(shinyWidgets)
 library(RColorBrewer)
-
-
+library(leaflet.minicharts)
+library(tidyr)
+library(bs4Dash)
+library(leaflet)
 
 # --------------------- CONSTANTES -----------------------#
-
+refrescar_min <- 360
 META_ANUAL_PLANTACION <- 2000
 CAPTURA_DE_CARBONO_POR_ARBOL  <- 10
 pal <- colorRampPalette(brewer.pal(8, "Set2"))
 colores <- pal(20)
+
+endpoint_api <- "https://five.epicollect.net/api/export/entries/plan-de-arbolado-parana-2024-2028?form_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80&branch_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80_6821e6b4761cf"
+endpoint_api_entrada <- "https://five.epicollect.net/api/export/entries/plan-de-arbolado-parana-2024-2028?form_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80"
+endpoint_api_monitor <- "https://five.epicollect.net/api/export/entries/plan-de-arbolado-parana-2024-2028?form_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80&branch_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80_68c1939a86125"
+
+
+
 
 # ----------- FUNCIONES DE CARGA DE DATOS API ----------- #
 
@@ -124,9 +133,14 @@ tema <-
     panel.border = element_rect(fill = NA, color = "#4caf50", linewidth = 1, linetype = "solid")
   )
 
+colores_presencia <- c(
+  "Sí"    = "#E74C3C",
+  "No" = "#2ECC71"  
+)
+
+colores_estado <- c(
+  "Atención urgente"    = "#E74C3C",  # rojo
+  "Con problemas leves" = "#F1C40F",  # amarillo
+  "Saludable"           = "#2ECC71"   # verde
+)
 # ----------- URL DEL ENDPOINT ----------- #
-
-endpoint_api <- "https://five.epicollect.net/api/export/entries/plan-de-arbolado-parana-2024-2028?form_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80&branch_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80_6821e6b4761cf"
-endpoint_api_entrada <- "https://five.epicollect.net/api/export/entries/plan-de-arbolado-parana-2024-2028?form_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80"
-endpoint_api_monitor <- "https://five.epicollect.net/api/export/entries/plan-de-arbolado-parana-2024-2028?form_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80&branch_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80_68c1939a86125"
-

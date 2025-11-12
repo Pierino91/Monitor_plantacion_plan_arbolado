@@ -23,10 +23,8 @@ ui <- dashboardPage(
     bs4SidebarMenu(
       menuItem("Resumen", tabName = "resumen", icon = icon("tree")),
       menuItem("Mapa", tabName = "map", icon = icon("map")),
-      menuItem("Evolución temporal", tabName = "evol", icon = icon("chart-simple")),
-      menuItem("Especies plantadas", tabName = "especies", icon = icon("seedling")),
-      menuItem("Monitoreo", tabName = "monitor", icon = icon("desktop"))
-      
+      menuItem("Monitoreo", tabName = "monitor", icon = icon("desktop")),
+      menuItem("Base de Datos", tabName = "datos", icon = icon("table"))
     )
   ),
   # Cuerpo del dashboard
@@ -79,11 +77,11 @@ ui <- dashboardPage(
         fluidRow(
           # Última actualización
           bs4Card(
-            title = tagList(icon("calendar-alt"), " Última actualización"),
+            title = tagList(icon("calendar-alt"), "Última actualización"),
             status = "info",
             solidHeader = TRUE,
             collapsible = FALSE,
-            width = 6,
+            width = 4,
             tags$div(
               style = "font-size: 30px; font-weight: bold; text-align: center;",
               uiOutput("fecha_max")
@@ -96,7 +94,7 @@ ui <- dashboardPage(
             status = "success",
             solidHeader = TRUE,
             collapsible = FALSE,
-            width = 6,
+            width = 4,
             tags$div(
               style = "font-size: 28px; font-weight: bold; text-align: center; margin-bottom: 10px;",
               textOutput("cant_arboles_total")
@@ -106,11 +104,11 @@ ui <- dashboardPage(
           
           # Factor de captura de carbono
           bs4Card(
-            title = tagList(icon("leaf"), " Captura estimada de CO₂"),
+            title = tagList(icon("leaf"), "Captura estimada de CO₂"),
             status = "olive",
             solidHeader = TRUE,
             collapsible = FALSE,
-            width = 6,
+            width = 4,
             tags$div(
               style = "font-size: 30px; font-weight: bold; text-align: center;",
               uiOutput("factor_de_captura_carbono")
@@ -118,6 +116,44 @@ ui <- dashboardPage(
             tags$p("kg CO₂ eq/anual 🌿", style = "font-size: 20px; text-align: center; margin-top: 10px;")
           )
         ),
+        fluidRow(
+          bs4Card(
+            title = "Árboles por sitio",
+            status = "primary",
+            solidHeader = TRUE,
+            width = 4,      # ocupa toda la fila
+            maximizable = TRUE,
+            collapsible = TRUE,
+            closable = FALSE,
+            plotlyOutput("grafico_sitio", 
+                         height = 350)
+          ),
+          bs4Card(
+            title = "Cronología",
+            status = "success",
+            solidHeader = TRUE,
+            maximizable = TRUE,
+            collapsible = TRUE,
+            closable = FALSE,
+            width = 4,
+            plotlyOutput("grafico_tiempo", 
+                         height = 350)
+          ),
+        # ),
+        # fluidRow(
+          bs4Card(
+            title = "Especies",
+            status = "success",
+            solidHeader = TRUE,
+            maximizable = TRUE,
+            collapsible = TRUE,
+            closable = FALSE,
+            width = 4,
+            plotlyOutput("grafico_especie", 
+                         height = 350)
+          )
+        )
+
         # Gráfico
         # fluidRow(
         #   box(
@@ -129,112 +165,131 @@ ui <- dashboardPage(
         #   )
         # ),
       ),
-    bs4TabItem(
-      tabName = "map",
-      h2("Distribución espacial"),
-      # Fila de valueBoxes
-      fluidRow(
-      # Mapa
-        box(
-          title = "Mapa de árboles plantados",
-          status = "success",
-          solidHeader = TRUE,
-          width = 12,
-          leafletOutput("mapa_arboles", height = "600px")
-        ),
-        box(
-          title = "Fotos",
-          status = "success",
-          solidHeader = TRUE,
-          width = 12,
-          sliderInput("index_slider", "Seleccionar índice:",
-                      min = 1, max = 10, value = 1, step = 1), # max lo ajustaremos en server
-          actionButton("previous", "Previous"),
-          actionButton("next", "Next"),
-          uiOutput("image")
-        )
-      )  
-    ),
-    bs4TabItem(
-      tabName = "evol",
-      h2("Evolución temporal del plantado de árboles"),
-      # title = "Plantaciones a lo largo del tiempo",
-      # Fila de valueBoxes
-      fluidRow(
+      bs4TabItem(
+        tabName = "map",
+        h2("Distribución espacial"),
+        # Fila de valueBoxes
+        fluidRow(
+          # Mapa
           box(
+            title = "Mapa de árboles plantados",
+            uiOutput("selector_sitio_mapa"),
             status = "success",
             solidHeader = TRUE,
             width = 12,
-            plotlyOutput("grafico_tiempo", height = "300px")
+            leafletOutput("mapa_arboles", height = "600px")
           ),
-            box(
-              title = "Detalle de plantaciones",
-              status = "success",
-              solidHeader = TRUE,
-              width = 12,
-              uiOutput("mensaje_tabla_especies"),
-              reactableOutput("tabla_especies")
-          )          
-      )
-    ),
-    bs4TabItem(
-      tabName = "especies",
-      h2("Especies plantadas"),
-      fluidRow(
-        uiOutput("selector_sitio"),
-        tableOutput("datos_filtrados"), 
-        box(
-          status = "success",
-          solidHeader = TRUE,
-          width = 12,
-          plotlyOutput("grafico_especie", height = "600px")
+          box(
+            title = "Fotos",
+            status = "success",
+            solidHeader = TRUE,
+            width = 12,
+            sliderInput("index_slider", "Seleccionar índice:",
+                        min = 1, max = 10, value = 1, step = 1), # max lo ajustaremos en server
+            actionButton("previous", "Previous"),
+            actionButton("next", "Next"),
+            uiOutput("image")
+          )
+        )  
+      ),
+      bs4TabItem(
+        tabName = "datos",
+        fluidRow(
+          bs4Card(
+            title = "Base de Datos Completa",
+            status = "primary",
+            solidHeader = TRUE,
+            width = 12,
+            maximizable = TRUE,
+            downloadButton("descargar_datos", "Descargar CSV", class = "btn-success mb-3")
+            # DTOutput("tabla_datos")
+          ),
+          bs4Card(
+            title = "Detalle de plantaciones",
+            status = "success",
+            solidHeader = TRUE,
+            width = 12,
+            reactableOutput("tabla_especies")
+          )    
+        )
+      ),
+      
+      bs4TabItem(
+        tabName = "monitor",
+        h2("Equipo de monitoreo"),
+        fluidRow(
+          # uiOutput("selector_sitio_monitoreo"),
+          box(
+            title = "Gráfico de monitoreo",
+            status = "success",
+            solidHeader = TRUE,
+            width = 6,
+            # uiOutput("mensaje_tabla_especies"),
+            plotlyOutput("Barras_monitoreo", height = "600px")
+          ), 
+          box(
+            uiOutput("selector_sitio_monitor"),
+            status = "success",
+            solidHeader = TRUE,
+            width = 6,
+            plotlyOutput("Tortas_Presencia", height = "600px")
+          ),
+          box(
+            title = "Tabla de monitoreo",
+            status = "success",
+            solidHeader = TRUE,
+            width = 12,
+            # uiOutput("mensaje_tabla_especies"),
+            reactableOutput("tabla_monitoreo")
+          )  
         )
       )
-     ),
-    bs4TabItem(
-      tabName = "monitor",
-      h2("Equipo de monitoreo"),
-      fluidRow(
-        # uiOutput("selector_sitio_monitoreo"),
-        box(
-          title = "Gráfico de monitoreo",
-          status = "success",
-          solidHeader = TRUE,
-          width = 12,
-          # uiOutput("mensaje_tabla_especies"),
-          plotlyOutput("Barras_monitoreo", height = "600px")
-        ), 
-        box(
-          uiOutput("selector_sitio_monitor"),
-          status = "success",
-          solidHeader = TRUE,
-          width = 12,
-          plotlyOutput("Tortas_Presencia", height = "600px")
-        ),
-        box(
-          title = "Tabla de monitoreo",
-          status = "success",
-          solidHeader = TRUE,
-          width = 12,
-          # uiOutput("mensaje_tabla_especies"),
-          reactableOutput("tabla_monitoreo")
-        )  
-      )
     )
-   )
   ),
   
-  controlbar = NULL,
-  footer = bs4DashFooter(left = "Subsecretaría de Ambiente", right = "Paraná, 2023 - 2027")
+ controlbar = dashboardControlbar(
+    skin = "light",
+    pinned = TRUE,
+    collapsed = FALSE,
+    overlay = FALSE,
+    
+    controlbarMenu(
+      id = "controlbarMenu",
+      
+      controlbarItem(
+        title = "Filtros",
+        
+        selectInput(
+          "sitio_filtro",
+          "Sitio:",
+          choices = "Cargando...", 
+          selected = NULL
+        ),
+        
+        # selectInput(
+        #   "especie_filtro",
+        #   "Especie:",
+        #   choices = c("Todas", unique(plantaciones_arboles()$especie)),
+        #   selected = "Todas"
+        # ),
+        
+        # uiOutput("selector_fecha"),
+        # hr(),
+        
+        actionButton(
+          "reset_filtros",
+          "Resetear Filtros",
+          icon = icon("redo"),
+          status = "warning",
+          width = "100%"
+        )
+      )
+    )
+  ),
+
+ footer = bs4DashFooter(left = "Subsecretaría de Ambiente", right = "Paraná, 2023 - 2027")
+ 
 )
 
-# # install.packages('rsconnect')
-# 
-# library(rsconnect)
-# rsconnect::setAccountInfo(name='secretaria-de-ambiente-y-salud',
-#                           token='59A4D29D0B62C7DC32941F343F767900',
-#                           secret='67dK/Pwf3vnv46IiKiftaxO7xjhg1Sfz8m00TwhY')
-#
-#
 # rsconnect::deployApp(appName="Plan_arbolado_2023_2027") 
 
