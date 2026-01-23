@@ -12,34 +12,14 @@ function(input, output, session) {
     # Obtener el primer enlace del endpoint
     tryCatch({
       first_link <- get_data(endpoint_api)$links$first
-      datos <- get_all_entries(first_link)
+      datos_crudo <- get_all_entries(first_link)
       
       # Si no es dataframe o viene vacío, devolvés NULL
-      if (is.null(datos) || nrow(datos) == 0) {
+      if (is.null(datos_crudo) || nrow(datos_crudo) == 0) {
         return(NULL)
       }
       
-      return(datos)
-    }, error = function(e) {
-      # Podrías agregar un log o mensaje interno aquí
-      warning("Error al obtener los datos: ", conditionMessage(e))
-      return(NULL)
-    })
-  })
-  
-  datos_monitor <- reactive({
-    auto_update()  # Actualiza cada vez que el timer se activa
-    # Obtener el primer enlace del endpoint
-    tryCatch({
-      first_link <- get_data(endpoint_api_monitor)$links$first
-      datos <- get_all_entries(first_link)
-      
-      # Si no es dataframe o viene vacío, devolvés NULL
-      if (is.null(datos) || nrow(datos) == 0) {
-        return(NULL)
-      }
-      
-      return(datos)
+      return(datos_crudo)
     }, error = function(e) {
       # Podrías agregar un log o mensaje interno aquí
       warning("Error al obtener los datos: ", conditionMessage(e))
@@ -68,56 +48,17 @@ function(input, output, session) {
     })
   })
   
-  arboles_monitoreo <- reactive({
-    
-    datos <- datos_monitor()
-    datos_tec <- datos_entradas()
-    
-    # # test
-    # datos <- get_all_entries(endpoint_api_monitor)
-    # datos_tec <- get_all_entries(endpoint_api_entrada)
-    
-    
-    if (is.null(datos)) return(NULL)
-    datos_test_monitoreo <- 
-      datos %>%
-      merge(datos_tec, by.x ="ec5_branch_owner_uuid", by.y="ec5_uuid") %>%
-      rename_with(~ gsub("^\\d+_", "", .x)) %>%
-      rename(
-        estado = "Semforo_del_estad",
-        obs = "Observacion_del_m",
-        foto_monitoreo = "Foto_del_arbol",
-        presencia  = "El_arbol_est_pres",
-        sitio = "Lugar",
-        agente = "Agente",
-        momento_monitoreo = "created_at.x"
-      ) %>%
-      mutate(
-        momento_monitoreo = ymd_hms(momento_monitoreo, tz = "UTC"),
-        sitio = factor(sitio),
-        obs = as.character(obs),
-        # Imagen miniatura con click → popup
-        foto_monitoreo = ifelse(
-          foto_monitoreo != "",
-          paste0("<img src='", foto_monitoreo, "' width='120' style='cursor:pointer;'/>"),
-          ""
-        )
-      ) %>%
-      select(agente, sitio, estado, obs, foto_monitoreo, presencia, momento_monitoreo)
-    
-  })
-  
-  plantaciones_arboles <- reactive({
-    datos <- datos_branch()
+  plantaciones_arboles_sin_filtro <- reactive({
+    datos_crudo <- datos_branch()
     datos_tec <- datos_entradas()
     # # test
-    # datos <- get_all_entries(endpoint_api)
-    # datos_tec <- get_all_entries(endpoint_api_entrada)
+     # datos <- get_all_entries(endpoint_api)
+     # datos_tec <- get_all_entries(endpoint_api_entrada)
     
     
-    if (is.null(datos)) return(NULL)
-    datos <-
-      datos %>%
+    if (is.null(datos_crudo)) return(NULL)
+    datos_proc <-
+      datos_crudo %>%
       merge(datos_tec, by.x ="ec5_branch_owner_uuid", by.y="ec5_uuid") %>%
       rename_with(~ gsub("^\\d+_", "", .x)) %>%
       rename(
@@ -146,140 +87,117 @@ function(input, output, session) {
         latitud = as.numeric(latitud),
         longitud = as.numeric(longitud)
       ) %>%
-      arrange(fecha_plantado, momento_relevado_arbol) %>%
+      arrange(momento_relevado_arbol) %>%
       mutate(ID = row_number())  %>%
       select(agente, sitio, fecha_plantado, latitud, longitud, especie, foto_plantado, lugar_especifico, altura, momento_relevado_arbol, obs,ID)
     
+    return(datos_proc)
+  })
+  
+  
+
+  
+ 
+#### Control barr #####
+
+plantaciones_arboles <- reactive({
     
-    if (input$sitio_filtro != "Todos") {
-      datos <- datos %>% filter(sitio == input$sitio_filtro)
+    datos <- plantaciones_arboles_sin_filtro()
+    if (is.null(datos)) return(NULL)
+    
+    # Aplicar filtro de sitio
+    if (!is.null(input$filtro_sitio) && input$filtro_sitio != "TODAS") {
+      datos <- datos %>% filter(sitio == input$filtro_sitio)
     }
     
+    # Aplicar filtro de presencia
+    if (!is.null(input$filtro_especie) && input$filtro_especie != "TODAS") {
+      datos <- datos %>% filter(especie == input$filtro_especie)
+    }
     
-    
-    # if (input$estado_filtro != "Todos") {
-    #   datos <- datos %>% filter(estado == input$estado_filtro)
-    # }
-    # 
-    # if (input$especie_filtro != "Todas") {
-    #   datos <- datos %>% filter(especie == input$especie_filtro)
-    # }
-    # 
-    
+    # Aplicar filtro de fecha
+    if (!is.null(input$filtro_fecha) &&
+        length(input$filtro_fecha) == 2 &&
+        !any(is.na(input$filtro_fecha))) {
+      datos <- datos %>% filter((fecha_plantado) >= input$filtro_fecha[[1]] &
+                                (fecha_plantado) <= input$filtro_fecha[[2]])
+      
+    }
     
     return(datos)
   })
-  
-  plantaciones_especies_tiempo <- reactive({
-    req(plantaciones_arboles())
-    datos <- plantaciones_arboles()
-    if (is.null(datos)) return(NULL)
-    datos |>
-      # datos_limpios |>
-      select(fecha_plantado, especie) |>
-      filter(!is.na(fecha_plantado)) |>
-      group_by(fecha_plantado, especie) |>
-      reframe(n_especies = n())
-  })
-  
-  plantaciones_tiempo <- reactive({
-    datos <- plantaciones_especies_tiempo()
-    if (is.null(datos)) return(NULL)
-    datos |>
-      ungroup() |>
-      group_by(fecha_plantado) |>
-      reframe(
-        n = sum(n_especies, na.rm = TRUE),
-        .groups = "drop") |>
-      mutate(
-        acumulado = cumsum(n)
-      )
-  })
-  
-  resumen_especie <- reactive({
-      req(plantaciones_arboles())
 
-      plantaciones_arboles() %>%
-        group_by(especie) %>%
-        summarise(n = n(), .groups = "drop")
+
+  output$selector_sitio_controlbar <- renderUI({
+    req(plantaciones_arboles_sin_filtro())
+    datos <- plantaciones_arboles_sin_filtro()
+    sitios <- unique(as.character(datos$sitio))
     
-    # if (is.null(datos)) return(NULL)
-    # datos |>
-    #   group_by(especie) |>
-    #   reframe(n = n()) |>
-    #   ungroup() |>
-    #   mutate(
-    #     porcentaje = n / sum(n) * 100,
-    #     etiqueta = paste0(round(porcentaje, 1), "%"),
-    #     ymax = cumsum(n),
-    #     ymin = c(0, head(ymax, n = -1)),
-    #     label_position = (ymax + ymin) / 2
-    #   )
+    selectInput(
+      "filtro_sitio",
+      NULL,
+      choices = c("TODAS" = "TODAS", sitios),
+      selected = "TODAS"
+    )
   })
   
-  plantacion_lugarEspecifico_especies <- reactive({
+  output$selector_especie_controlbar <- renderUI({
+    req(plantaciones_arboles_sin_filtro())
+    datos <- plantaciones_arboles_sin_filtro()
+    especies <- unique(as.character(datos$especie))
+    
+    selectInput(
+      "filtro_especie",
+      NULL,
+      choices = c("TODAS" = "TODAS", especies),
+      selected = "TODAS"
+    )
+  })
+  
+  output$selector_fecha_controlbar <- renderUI({
+    req(plantaciones_arboles_sin_filtro())
+    datos <- plantaciones_arboles_sin_filtro()
+    
+    fecha_min <- ymd_hms(min(datos$fecha_monitoreo, na.rm = TRUE)) - days(1)
+    fecha_max <- ymd_hms(max(datos$fecha_monitoreo, na.rm = TRUE)) + days(1)
+    
+    dateRangeInput(
+      "filtro_fecha",
+      label = "",
+      separator = " a ",
+      start = fecha_min,
+      end = fecha_max,
+      min = fecha_min,
+      max = fecha_max
+    )
+  })
+  
+
+  output$total_registros_filtrados <- renderUI({
     datos <- plantaciones_arboles()
-    if (is.null(datos)) return(NULL)
-    datos |>
-      select(fecha_plantado, sitio, especie) |>
-      group_by(fecha_plantado, sitio, especie) |>
-      reframe(Cantidad = n()) |>
-      rename("Especies" = "especie", 
-             "Lugar específico" = "sitio",
-             "Fecha" = "fecha_plantado"
-      )
-  })
-  
-  
-  ##### Control barr #####
-  
-  observe({
-    datos <- plantaciones_arboles()
-    sitios <- sort(unique(datos$sitio))
+    total <- if (!is.null(datos)) nrow(datos) else 0
     
-    # Solo actualiza si los choices cambian
-    if (!setequal(sitios, setdiff(input$sitio_filtro, "Todos"))) {
-      updateSelectInput(
-        inputId = "sitio_filtro",
-        choices = c("Todos", sitios),
-        selected = isolate(input$sitio_filtro)
-      )
-    }
+    tags$h3(
+      style = "margin: 0; color: #2e7d32; font-size: 32px; font-weight: 700;",
+      total
+    )
   })
   
-  # Reset filtros
-  observeEvent(input$reset_filtros, {
-    updateSelectInput(session, "sitio_filtro", selected = "Todos")
-    # updateSelectInput(session, "estado_filtro", selected = "Todos")
-    # updateSelectInput(session, "especie_filtro", selected = "Todas")
-    # updateDateRangeInput(session, "fecha_filtro",
-    #                      start = min(datos_arboles$fecha_plantado),
-    #                      end = max(datos_arboles$fecha_plantado))
+
+  observeEvent(input$limpiar_filtros, {
+    datos <- plantaciones_arboles_sin_filtro()
+    fecha_min <- ymd_hms(min(datos$fecha_monitoreo, na.rm = TRUE)) - days(1)
+    fecha_max <- ymd_hms(max(datos$fecha_monitoreo, na.rm = TRUE)) + days(1)
     
+    req(plantaciones_arboles())
+    updateSelectInput(session, "filtro_sitio", selected = "TODAS")
+    updateSelectInput(session, "filtro_especie", selected = "TODOS")
+    updateDateRangeInput(session, "filtro_fecha", start = fecha_min, end = fecha_max, min = fecha_min, max = fecha_max)
   })
+
   
-  # output$selector_fecha <- renderUI({
-  #   datos <- plantaciones_arboles()
-  #   
-  #   if (is.null(datos) || nrow(datos) == 0) {
-  #     return(
-  #       tags$p("Sin datos disponibles para filtrar por fecha", style = "color: gray;")
-  #     )
-  #   }
-  #   
-  #   dateRangeInput(
-  #     "fecha_filtro",
-  #     "Rango de Fechas:",
-  #     start = min(datos$fecha_plantado, na.rm = TRUE),
-  #     end = max(datos$fecha_plantado, na.rm = TRUE),
-  #     language = "es",
-  #     separator = "hasta"
-  #   )
-  # })
-  
-  
-##### UI ###
-  #### Resumen ####
+#### UI ####
+#### Resumen ####
 
   output$total_arboles <- renderText({
     req(input$sitio, plantaciones_arboles())
@@ -377,10 +295,43 @@ function(input, output, session) {
   
   output$grafico_tiempo <- renderPlotly({
     
-    datos_esp <- plantaciones_especies_tiempo()
-    datos_tiempo <- plantaciones_tiempo()
+    req(plantaciones_arboles())
+    datos_proc <- plantaciones_arboles()
     
-    if (is.null(datos_esp) || nrow(datos_esp) == 0) {
+    if (is.null(datos_proc)) return(NULL)
+    
+        # datos_tiempo <- datos |>
+    #   # datos_limpios |>
+    #   select(fecha_plantado, especie) |>
+    #   filter(!is.na(fecha_plantado)) |>
+    #   group_by(fecha_plantado, especie) |>
+    #   reframe(n_especies = n())
+    
+    datos <- 
+      datos_proc |>
+      mutate(
+        mes = as.Date(
+          paste0("01-", month(fecha_plantado), "-", year(fecha_plantado)),
+          format = "%d-%m-%Y"
+        )
+      ) |>
+      group_by(
+        mes
+      ) |>
+      reframe(
+        n = n()
+      ) |>
+      ungroup(
+      ) |>
+      mutate(
+        acumulado = cumsum(n)
+      ) |>
+      filter(
+        # mes>as.Date("2025-01-01")
+      )
+    
+    
+    if (is.null(datos) || nrow(datos) == 0) {
       plot_ly() |> 
         layout(
           annotations = list(
@@ -395,64 +346,112 @@ function(input, output, session) {
         )
     } else {
       plot_ly() |> 
-        # Barras apiladas
+        # Barras mensuales
         add_bars(
-          data = datos_esp,
-          x = ~fecha_plantado,
-          y = ~n_especies,
-          color = ~especie,
-          colors = colores,
-          name = ~especie,
-          opacity = 0.7,
-          yaxis = "y"
+          data = datos,
+          x = ~mes,
+          y = ~n,
+          marker = list(
+            color = "#2e7d32",
+            line = list(color = "#1b5e20", width = 0.5)
+          ),
+          opacity = 0.85,
+          yaxis = "y",
+          name = "Mensual"
         ) |>
-        # Línea acumulada (segundo eje)
+        # Línea acumulada
         add_lines(
-          data = datos_tiempo,
-          x = ~fecha_plantado,
+          data = datos,
+          x = ~mes,
           y = ~acumulado,
           name = "Acumulado",
-          line = list(width = 2, color = 'black'),
+          line = list(width = 3, color = "#66bb6a"),
           yaxis = "y2"
         ) |>
-        # Puntos acumulados (segundo eje)
+        # Puntos acumulados
         add_markers(
-          data = datos_tiempo,
-          x = ~fecha_plantado,
+          data = datos,
+          x = ~mes,
           y = ~acumulado,
-          name = "Puntos Acumulado",
-          marker = list(size = 6, color = 'black'),
-          yaxis = "y2"
+          marker = list(
+            size = 6,
+            color = "#66bb6a",
+            line = list(color = "white", width = 1)
+          ),
+          yaxis = "y2",
+          showlegend = FALSE
         ) |>
         layout(
-          xaxis = list(title = "Fecha"),
-          yaxis = list(title = "Árboles (por especie)"),
+          title = list(
+            text = paste0(
+              "<b>Evolución mensual de árboles plantados</b>",
+              "<br><span style='color:#4caf50;font-size:16px;'>",
+              "Seguimiento operativo y acumulado histórico</span>"
+            ),
+            x = 0.01,
+            y = 0.95
+          ),
+          paper_bgcolor = "#f5f7fa",
+          plot_bgcolor  = "#e8f5e9",
+          xaxis = list(
+            title = "Período",
+            showgrid = FALSE,
+            zeroline = FALSE,
+            tickfont = list(color = "#2c3e50")
+          ),
+          yaxis = list(
+            title = "Árboles plantados (mensual)",
+            showgrid = TRUE,
+            gridcolor = "rgba(0,0,0,0.05)",
+            zeroline = FALSE,
+            tickfont = list(color = "#2c3e50"),
+            titlefont = list(color = "#2c3e50")
+          ),
           yaxis2 = list(
-            title = "Acumulado",
+            title = "Total acumulado",
             overlaying = "y",
             side = "right",
-            showgrid = FALSE
+            showgrid = FALSE,
+            tickfont = list(color = "#2c3e50"),
+            titlefont = list(color = "#2c3e50")
           ),
-          margin = list(l = 0, r = 80, t = 0, b = 0), # 👈 más margen derecho e izquierdo
+          margin = list(l = 60, r = 80, t = 80, b = 50),
           showlegend = FALSE,
-          barmode = 'stack',
-          legend = list(orientation = "h", y = -0.2) # opcional, para ubicar leyenda abajo
+          barmode = "stack"
         )
+      
     }
     
   })
   
   output$grafico_especie <- renderPlotly({
 
-    datos_esp <- resumen_especie()
     
+    datos_esp <- plantaciones_arboles() %>%
+      count(especie, name = "n") %>%   # más rápido que group_by + summarise
+      arrange(desc(n))
     
-    # datos_esp <- plantaciones_arboles() %>%
-      
+    total <- sum(datos_esp$n)          # se calcula UNA vez
     
+    datos_esp <- datos_esp %>%
+      mutate(
+        porcentaje = n / total * 100,
+        porcentaje_lbl = sprintf("%.1f%%", porcentaje),
+        categoria = case_when(
+          porcentaje < 5  ~ "Baja",
+          porcentaje < 10 ~ "Media",
+          porcentaje < 20 ~ "Alta",
+          TRUE            ~ "Muy alta"
+        ),
+        hover_txt = paste0(
+          "Individuos: ", porcentaje_lbl,
+          "<br>Estado: ", categoria
+        )
+      )
     
     if (is.null(datos_esp) || nrow(datos_esp) == 0) {
-      plot_ly() |> 
+
+      plot_ly() |>
         layout(
           annotations = list(
             text = "Sin datos disponibles",
@@ -464,36 +463,154 @@ function(input, output, session) {
           xaxis = list(showticklabels = FALSE, zeroline = FALSE),
           yaxis = list(showticklabels = FALSE, zeroline = FALSE)
         )
+
     } else {
-      # print("debuuuug!")
-      plot_ly(
-        datos_esp,
-        x = ~especie,
-        y = ~n,
-        type = 'bar',
-        color = ~especie,
-        textinfo = 'label+percent',
-        insidetextorientation = 'radial'
-      ) |> layout(showlegend = FALSE,
-                  yaxis = list(title = "Total de árboles") 
-                  
-      ) 
-      
+
+    
+    plot_ly(
+      datos_esp,
+      x = ~especie,
+      y = ~n,
+      type = "bar",
+      color = ~categoria,
+      colors = c(
+        "Muy alta"    = "#2e7d32",
+        "Alta"   = "#9ccc65",
+        "Media"    = "#ef6c00",
+        "Baja" = "#c62828"
+      ),
+      text = ~porcentaje_lbl,
+      textposition = "outside",
+      hovertemplate = paste0(
+        "<b>%{x}</b>",
+        "<br>Total: %{y}",
+        "<br>%{customdata}",
+        "<extra></extra>"
+      ),
+      customdata = ~hover_txt
+    ) |>
+      layout(
+        title = list(
+          text = paste0(
+            "<b>Distribución de árboles por especie</b>",
+            "<br><span style='color:#4caf50;font-size:12px;'>",
+            "Clasificación por nivel de representación</span>"
+          ),
+          x = 0.01
+        ),
+        paper_bgcolor = "#f5f7fa",
+        plot_bgcolor  = "#e8f5e9",
+        xaxis = list(
+          title = "Especie",
+          tickangle = -45,
+          showgrid = FALSE,
+          categoryorder = "array",
+          categoryarray = datos_esp$especie   # vector ya ordenado
+        ),
+        yaxis = list(
+          title = "Total de árboles",
+          showgrid = TRUE,
+          gridcolor = "rgba(0,0,0,0.05)"
+        ),
+        legend = list(
+          orientation = "h",
+          x = 0.5,
+          xanchor = "center",
+          y = 1.15
+        ),
+        margin = list(l = 60, r = 30, t = 120, b = 120),
+        showlegend = TRUE
+      )
+    
     }
     
+    # datos_esp <- datos_proc %>%
+    #   group_by(especie) %>%
+    #   summarise(n = n(), .groups = "drop") %>%
+    #   mutate(
+    #     porcentaje = n / sum(n) * 100
+    #   )
+    # 
+    # if (is.null(datos_esp) || nrow(datos_esp) == 0) {
+    #   
+    #   plot_ly() |> 
+    #     layout(
+    #       annotations = list(
+    #         text = "Sin datos disponibles",
+    #         x = 0.5,
+    #         y = 0.5,
+    #         showarrow = FALSE,
+    #         font = list(size = 20)
+    #       ),
+    #       xaxis = list(showticklabels = FALSE, zeroline = FALSE),
+    #       yaxis = list(showticklabels = FALSE, zeroline = FALSE)
+    #     )
+    #   
+    # } else {
+    #   
+    #   plot_ly(
+    #     datos_esp |> arrange(desc(n)),
+    #     x = ~especie,
+    #     y = ~n,
+    #     type = "bar",
+    #     marker = list(
+    #       color = "#4caf50",
+    #       line = list(color = "#2e7d32", width = 0.5)
+    #     ),
+    #     text = ~paste0(round(porcentaje, 1), "%"),
+    #     textposition = "outside",
+    #     hovertemplate = paste0(
+    #       "<b>%{x}</b>",
+    #       "<br>Total: %{y}",
+    #       "<br>Participación: %{customdata:.1f}%",
+    #       "<extra></extra>"
+    #     ),
+    #     customdata = ~porcentaje
+    #   ) |>
+    #     layout(
+    #       title = list(
+    #         text = paste0(
+    #           "<b>Distribución de árboles por especie</b>",
+    #           "<br><span style='color:#4caf50;font-size:12px;'>",
+    #           "Cantidad absoluta y participación relativa</span>"
+    #         ),
+    #         x = 0.01,
+    #         y = 0.95
+    #       ),
+    #       paper_bgcolor = "#f5f7fa",
+    #       plot_bgcolor  = "#e8f5e9",
+    #       xaxis = list(
+    #         title = "Especie",
+    #         tickangle = -45,
+    #         showgrid = FALSE,
+    #         tickfont = list(color = "#2c3e50")
+    #       ),
+    #       yaxis = list(
+    #         title = "Total de árboles",
+    #         showgrid = TRUE,
+    #         gridcolor = "rgba(0,0,0,0.05)",
+    #         zeroline = FALSE,
+    #         tickfont = list(color = "#2c3e50"),
+    #         titlefont = list(color = "#2c3e50")
+    #       ),
+    #       margin = list(l = 60, r = 30, t = 80, b = 120),
+    #       showlegend = FALSE
+    #     )
+    # }
+
   })
   
   
-  #### Mapa  ####
+#### Mapa  ####
   
   data_mapa_arboles <- reactive({
     req(plantaciones_arboles())
     datos <- plantaciones_arboles()
     # test
-    # datos <- datos_test_plantacion
+    # datos <- datos
     
     if (is.null(datos)) return(NULL)
-    # datos_test_mapa_arboles <-
+    # datos <-
     datos |>
       filter(!is.na(latitud)) |>
       st_as_sf(coords = c("longitud", "latitud"), crs = 4326)
@@ -527,22 +644,39 @@ function(input, output, session) {
       }
       
       leaflet(datos) %>%
-        addTiles( # usa Mapbox o Google
-          urlTemplate = "https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}?access_token=TU_MAPBOX_TOKEN",
-          options = tileOptions(maxZoom = 22)
+        
+        addProviderTiles(providers$CartoDB.Positron, 
+                         group = "Base") %>%
+        
+        addPolygons(
+          data = vecinales,
+          color = "#ff5722",
+          weight = 1,
+          fillOpacity = 0.25,
+          popup = ~paste0("<b>Vecinal:</b> ", nombre),
+          highlightOptions = highlightOptions(
+            weight = 3,
+            color = "#ff9800",
+            bringToFront = TRUE
+          ),
+          group = "Vecinales"
         ) %>%
-        # addProviderTiles(providers$CartoDB.Positron) %>%
+        
         addCircleMarkers(
           radius = 1,
-          # radius = 30,
           color = "#4caf50",
           fillOpacity = 0.7,
           popup = ~paste0(
-            "ID: ", ID, "<br>Especie: ", especie,
-            "<br><img src='", foto_plantado, "' width='192' height='256'>"
-          )
+            "ID: ", ID, 
+            "<br>Especie: ", especie,
+            "<br><img src='", foto_plantado,
+            "' width='192' height='256'>"),
+            group = "Plantaciones"
+        ) %>%
+        addLayersControl(
+          overlayGroups = c("Vecinales", "Plantaciones"),
+          options = layersControlOptions(collapsed = FALSE)
         )
-      
     } else if (input$sitio_mapa == "Estadísticas por sitio") {
       
       if (is.null(datos) || nrow(datos) == 0) {
@@ -609,9 +743,7 @@ function(input, output, session) {
           colorPalette = paleta,
           width = 70
         )
-    } else {
-      leaflet() %>% addTiles()
-    }
+    } 
   })
   
   index <- reactiveVal(1)
@@ -668,17 +800,14 @@ function(input, output, session) {
     
   })
   
-  
   # Grafico de especies:
   # TODO hacer para filtre de acuerdo al sitio
   
   
   
-  #### Base de datos #####
-  
-  # Descargar datos
-  
-  output$descargar_datos <- downloadHandler(
+#### Base de datos #####
+
+output$descargar_datos <- downloadHandler(
     filename = function() {
       paste0("arbolado_", Sys.Date(), ".csv")
     },
@@ -695,197 +824,56 @@ function(input, output, session) {
     }
   )
   
-  output$tabla_especies <- renderReactable({
+  output$descargar_datos_crudos <- downloadHandler(
+    filename = function() {
+      paste0("arbolado_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      datos <- plantaciones_arboles()
+      write.csv(datos, file, row.names = FALSE)
+    }
+  )
+  
+ output$tabla_especies <- renderReactable({
     
-    datos <- plantacion_lugarEspecifico_especies()
-    
-    
+     datos <- plantaciones_arboles()
+     
+     datos_sf <- datos |>
+       filter(
+         !is.na(latitud),
+         !is.na(longitud)
+       ) |>
+       st_as_sf(
+         coords = c("longitud", "latitud"),
+         crs = 4326,
+         remove = FALSE
+       ) |>
+       st_join(
+         vecinales %>% select(vecinal = nombre),
+         join = st_within
+       ) |>
+       st_drop_geometry(
+       ) |>
+       select(fecha_plantado, vecinal, especie
+       ) |>
+       group_by(fecha_plantado, vecinal, especie
+       ) |>
+       summarise(Cantidad = n(), .groups = "drop"
+       ) |>
+       rename(
+         Especies = especie,
+         Vecinal = vecinal,
+         Fecha = fecha_plantado
+       ) |>
+       as.data.frame()
+  
+
     if (is.null(datos) || nrow(datos) == 0) {
       return(NULL)  
     }
-    reactable(datos)
+    
+    reactable(datos_sf)
   })
-  
-  
-  
-  
-  
-  #### Monitoreo ####
-  
-  output$selector_sitio_monitor <- renderUI({
-    req(arboles_monitoreo()) 
-    datos <- arboles_monitoreo()
-    datos$sitio <- as.character(datos$sitio)
-    sitios <- unique(datos$sitio)
-    # print(sitios)
-    selectInput("sitio_monitor", "Elegí un sitio:", choices = c("TODAS", sitios))
-  })
-  
-  output$Tortas_Presencia <- renderPlotly({
-    req(arboles_monitoreo())
-    req(input$sitio_monitor)
-    
-    if(input$sitio_monitor != "TODAS"){
-      datos <- arboles_monitoreo() %>% 
-        filter(sitio == input$sitio_monitor)%>%
-        select(presencia)%>%
-        group_by(presencia)%>%
-        reframe(n = n())%>%
-        ungroup()%>%
-        mutate(
-          total=sum(n),
-          porc=n/total*100
-        ) 
-    }else{
-      datos <- 
-        # datos_test_monitoreo %>%
-        arboles_monitoreo() %>%
-        select(presencia)%>%
-        group_by(presencia)%>%
-        reframe(n = n())%>%
-        ungroup()%>%
-        mutate(
-          total=sum(n),
-          porc=n/total*100
-        ) 
-    }
-    
-    
-    if (is.null(datos) || nrow(datos) == 0) {
-      plot_ly() |> 
-        layout(
-          annotations = list(
-            text = "Sin datos disponibles",
-            x = 0.5,
-            y = 0.5,
-            showarrow = FALSE,
-            font = list(size = 20)
-          ),
-          xaxis = list(showticklabels = FALSE, zeroline = FALSE),
-          yaxis = list(showticklabels = FALSE, zeroline = FALSE)
-        )
-    } else {
-      # Crear una lista de gráficos (uno por sitio)
-      plot_ly(
-        data = datos,
-        labels = ~presencia,
-        values = ~n,
-        type = 'pie',
-        # color = ~presencia,
-        colors = colores_presencia,
-        text = ~paste0(round(porc, 1), "%"),
-        textposition = 'inside',              # texto dentro del sector
-        textinfo = 'label+text',              # muestra etiqueta + %
-        insidetextfont = list(color = "black", size = 14),  # 💡 texto negro y claro
-        hoverinfo = 'label+percent+value',
-        showlegend = TRUE,
-        marker = list(colors = colores_presencia)  # ✅ aquí se aplican los colores
-      ) %>%
-        layout(
-          title = "Distribución de presencia",
-          legend = list(title = list(text = "<b>Presencia</b>"))
-        )
-    }
-    
-  })
-  
-  output$Barras_monitoreo <- renderPlotly({
-    
-    datos <-
-      # datos_test_monitoreo %>%
-      arboles_monitoreo()%>%
-      select(sitio, estado)%>%
-      group_by(sitio,estado)%>%
-      reframe(n = n())%>%
-      ungroup()%>%
-      group_by(sitio)%>%
-      mutate(
-        total=sum(n),
-        porc=n/total*100
-      ) %>%
-      ungroup()
-    
-    
-    
-    if (is.null(datos) || nrow(datos) == 0) {
-      plot_ly() |> 
-        layout(
-          annotations = list(
-            text = "Sin datos disponibles",
-            x = 0.5,
-            y = 0.5,
-            showarrow = FALSE,
-            font = list(size = 20)
-          ),
-          xaxis = list(showticklabels = FALSE, zeroline = FALSE),
-          yaxis = list(showticklabels = FALSE, zeroline = FALSE)
-        )
-    } else {
-      plot_ly(
-        data = datos,
-        x = ~sitio,
-        y = ~n,
-        type = 'bar',
-        color = ~estado,
-        colors = colores_estado,              # 💡 paleta personalizada
-        text = ~paste0(round(porc, 1), "%"),  # etiqueta con porcentaje
-        textposition = 'inside',
-        hoverinfo = 'text',
-        insidetextfont = list(color = 'black'),
-        hovertext = ~paste(
-          "Sitio:", sitio,
-          "<br>Estado:", estado,
-          "<br>Cantidad:", n,
-          "<br>Porcentaje:", round(porc, 1), "%"
-        )
-      ) |> 
-        layout(
-          yaxis = list(title = "Cantidad"),
-          xaxis = list(title = "Sitio"),
-          barmode = 'stack'  # o 'group' si preferís barras separadas
-        )
-    }
-    
-    
-  })
-  
-  output$tabla_monitoreo <- renderReactable({
-    
-    datos <- arboles_monitoreo()
-    
-    if (is.null(datos) || nrow(datos) == 0) {
-      return(NULL)  
-    }
-    reactable(datos, 
-              rowStyle = function(index) {
-                estado <- datos$estado[index]
-                color <- if (estado == "Saludable") {
-                  "#d4edda"   # verde claro
-                } else if (estado == "Atención urgente") {
-                  "#f8d7da"   # rojo claro
-                } else if (estado == "Con problemas leves") {
-                  "#fff3cd"   # amarillo claro
-                } else {
-                  "white"
-                }
-                list(background = color)
-              },
-              columns = list(
-                `foto_monitoreo` = colDef(name = "Foto", html = TRUE),
-                `agente`= colDef(name = "Agente responsable"),
-                `sitio`= colDef(name = "Lugar"),
-                `estado` = colDef(name = "Estado"),
-                `obs` = colDef(name = "Observación"),
-                `presencia` = colDef(name = "Presencia"),
-                `momento_monitoreo` = colDef(name = "Fecha del Monitoreo")
-              ),
-              bordered = TRUE,
-              highlight = TRUE,
-              striped = TRUE
-    )
-  })
-  
-  
-  
-  
+
+
 }
