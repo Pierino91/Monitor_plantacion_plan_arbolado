@@ -1,3 +1,4 @@
+#### START FILE: global.R ####
 #### Funciones ####
 
 library(shiny)
@@ -23,9 +24,12 @@ library(RColorBrewer)
 library(leaflet.minicharts)
 library(tidyr)
 library(bs4Dash)
+<<<<<<< HEAD
 library(openxlsx)
 library(xml2)
 
+=======
+>>>>>>> a385992d86956dd641f394aaca59a2e5ff0ca8e3
 
 # --------------------- CONSTANTES -----------------------#
 refrescar_min <- 720
@@ -34,87 +38,133 @@ CAPTURA_DE_CARBONO_POR_ARBOL  <- 10
 pal <- colorRampPalette(brewer.pal(8, "Set2"))
 colores <- pal(20)
 
+# --------------------- SIMPLE CACHE FOR API CALLS ---------------------#
+# A lightweight in-memory cache to avoid refetching the same URL repeatedly
+.api_cache <- new.env(parent = emptyenv())
 
-# ----------- FUNCIONES DE CARGA DE DATOS API ----------- #
-
-get_data <- function(url) {
-  response <- GET(url)
-  if (status_code(response) == 200) {
-    content <- fromJSON(content(response, as = "text"))
-    return(content)
-  } else {
-    warning(paste("Error al acceder al enlace:", url, " - Código de estado: ", status_code(response)))
-    return(NULL)
+cache_get <- function(key) {
+  if (exists(key, envir = .api_cache)) {
+    obj <- get(key, envir = .api_cache)
+    # obj should be a list: list(time = POSIXct, value = <data>)
+    return(obj)
   }
+  NULL
 }
 
+cache_set <- function(key, value) {
+  assign(key, list(time = Sys.time(), value = value), envir = .api_cache)
+}
 
+# get_data with basic caching and retry/backoff
+get_data <- function(url, ttl = 90, max_attempts = 3) {
+  # ttl in seconds
+  key <- url
+  cached <- cache_get(key)
+  if (!is.null(cached)) {
+    age <- as.numeric(difftime(Sys.time(), cached$time, units = "secs"))
+    if (age < ttl) {
+      return(cached$value)
+    }
+  }
 
-get_all_entries <- function(base_url) {
-  
-  all_entries <- tibble()  # Inicializar el tibble vacío
-  all_lugar <- tibble()    # Inicializar el tibble para coordenadas si existen
-  
-  # Obtener el primer conjunto de datos
-  operarios_crudo_get <- get_data(base_url)
-  # operarios_crudo_get <- get_data(all_data$`https://five.epicollect.net/api/export/entries/escuela-separacion-de-residuos?form_ref=1e5048d2af5c4071b39e53e008ba5935_64429dd5c8e88`$links$first)
-  
-  
-  while (!is.null(operarios_crudo_get$links$self)) {
-    
-    if (!is.null(operarios_crudo_get$data$entries)) {
-      
-      # Convertir a tibble
-      entries <- as_tibble(operarios_crudo_get$data$entries)
-      
-      # Convertir todas las columnas numéricas a character
-      entries <- entries %>%
-        mutate(across(where(is.numeric), as.character))
-      
-      # Detectar si hay una columna con datos de ubicación y procesarla
-      col_lugar <- names(entries)[sapply(entries, is.list)]  
-      
-      if (length(col_lugar) > 0) {
-        # Extraer datos de latitud, longitud y precisión
-        lugar_df <- entries[col_lugar] %>%
-          map_dfr(~ tibble(
-            latitude = as.character(.x$latitude),
-            longitude = as.character(.x$longitude),
-            accuracy = as.character(.x$accuracy)
-          ))
-        
-        all_lugar <- bind_rows(all_lugar, lugar_df)
-        
-        # Eliminar la columna de ubicación del dataframe original
-        entries <- select(entries, -all_of(col_lugar))
+  attempt <- 1
+  repeat {
+    resp <- try(GET(url, timeout(20)), silent = TRUE)
+    if (inherits(resp, "try-error")) {
+      if (attempt >= max_attempts) {
+        warning("get_data: request failed after attempts: ", conditionMessage(attr(resp, "condition")))
+        return(NULL)
       }
-      
-      # Acumular los datos
-      all_entries <- bind_rows(all_entries, entries)
+      Sys.sleep(1 * attempt)
+      attempt <- attempt + 1
+      next
     }
-    
-    # Obtener el siguiente enlace
-    next_link <- operarios_crudo_get$links$`next`
-    
-    # Si no hay más páginas, salir del bucle
-    if (is.null(next_link)) {
-      break
+
+    if (status_code(resp) != 200) {
+      if (attempt >= max_attempts) {
+        warning(sprintf("get_data: unexpected status %s for %s", status_code(resp), url))
+        return(NULL)
+      }
+      Sys.sleep(1 * attempt)
+      attempt <- attempt + 1
+      next
     }
-    
-    # Obtener el siguiente conjunto de datos
-    operarios_crudo_get <- get_data(next_link)
-    Sys.sleep(1)
-  }
-  
-  # Retornar los datos combinados si existe información de ubicación
-  if (nrow(all_lugar) > 0) {
-    return(cbind(all_entries, all_lugar))
-  } else {
-    return(all_entries)
+
+    parsed <- try(content(resp, as = "text", encoding = "UTF-8"), silent = TRUE)
+    if (inherits(parsed, "try-error")) {
+      return(NULL)
+    }
+
+    # attempt to parse json to list or dataframe
+    parsed_json <- try(fromJSON(parsed, simplifyVector = FALSE), silent = TRUE)
+    if (inherits(parsed_json, "try-error")) {
+      # store raw text to cache to avoid refetch storms
+      cache_set(key, parsed)
+      return(parsed)
+    }
+
+    cache_set(key, parsed_json)
+    return(parsed_json)
   }
 }
-# ----------- Vecinales ----------- #
 
+# ----------- get_all_entries (uses get_data) ----------- #
+# This function iterates paginated endpoints and merges results.
+get_all_entries <- function(first_link) {
+  if (is.null(first_link) || first_link == "") return(data.frame())
+
+  all_entries <- list()
+  all_lugar <- data.frame()
+
+  next_link <- first_link
+  while (!is.null(next_link) && next_link != "") {
+    res <- get_data(next_link)
+    if (is.null(res)) break
+
+    # Expected structure: res$results or res$data depending on API
+    # adapt safely
+    entries <- NULL
+    if (!is.null(res$results)) entries <- res$results
+    if (is.null(entries) && !is.null(res$data)) entries <- res$data
+    if (is.null(entries) && is.list(res)) entries <- res
+
+    if (is.null(entries)) break
+
+    # try to coerce to data.frame where possible
+    df <- try(as.data.frame(entries, stringsAsFactors = FALSE), silent = TRUE)
+    if (!inherits(df, "try-error")) {
+      all_entries <- append(all_entries, list(df))
+    }
+
+    # handle next link if present
+    if (!is.null(res$links) && !is.null(res$links$`next`)) {
+      next_link <- res$links$`next`
+    } else {
+      next_link <- NULL
+    }
+
+    Sys.sleep(0.2)
+  }
+
+  if (length(all_entries) == 0) return(data.frame())
+
+  combined <- bind_rows(all_entries)
+  combined
+}
+
+# ----------- Vecinales ----------- #
+# load once and keep in memory
+vecinales <- tryCatch({
+  st_read("www/Vecinales.kml", quiet = TRUE) %>%
+    st_zm(drop = TRUE, what = "ZM") %>%
+    st_transform(4326) %>%
+    rename(nombre = "Name")
+}, error = function(e) {
+  warning("Could not load Vecinales.kml: ", conditionMessage(e))
+  NULL
+})
+
+<<<<<<< HEAD
 VECINALES <- st_read("www/Vecinales.kml", quiet = TRUE) %>%
   st_zm(drop = TRUE, what = "ZM") %>%
   st_transform(4326)%>%
@@ -162,3 +212,7 @@ endpoint_api <- "https://five.epicollect.net/api/export/entries/plan-de-arbolado
 endpoint_api_entrada <- "https://five.epicollect.net/api/export/entries/plan-de-arbolado-parana-2024-2028?form_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80"
 
 endpoint_api_monitor <- "https://five.epicollect.net/api/export/entries/plan-de-arbolado-parana-2024-2028?form_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80&branch_ref=d82673133a804a53bf373c6c41be5f99_6821e5dd2ef80_68c1939a86125"
+=======
+# ----------- END global.R ####
+#### END FILE ####
+>>>>>>> a385992d86956dd641f394aaca59a2e5ff0ca8e3
