@@ -13,6 +13,7 @@ library(DT)
 library(httr)
 library(lubridate)
 library(leaflet)
+library(leaflet.extras)
 library(sf)
 library(dplyr)
 library(ggplot2)
@@ -22,9 +23,9 @@ library(RColorBrewer)
 library(leaflet.minicharts)
 library(tidyr)
 library(bs4Dash)
-library(shiny)
-library(leaflet)
-library(reactable)
+library(openxlsx)
+library(xml2)
+
 
 # --------------------- CONSTANTES -----------------------#
 refrescar_min <- 720
@@ -114,14 +115,45 @@ get_all_entries <- function(base_url) {
 }
 # ----------- Vecinales ----------- #
 
-vecinales <- st_read("www/Vecinales.kml", quiet = TRUE) %>%
+VECINALES <- st_read("www/Vecinales.kml", quiet = TRUE) %>%
   st_zm(drop = TRUE, what = "ZM") %>%
   st_transform(4326)%>%
   rename(nombre ="Name")
 
+# ----------- Unidades Municipales ----------- #
 
+UNIDADES_MUNICIPALES <- 
+  st_read("www/Unidades de gestión de SSPP.kml", quiet = TRUE) %>%
+  st_zm(drop = TRUE, what = "ZM") %>%
+  st_transform(4326) %>%
+  rename(nombre ="Name")
 
+# ----------- Densidades poblacionales ----------- #
 
+densidades_poblacionales <-  read_xml("www/Radios_censales/Intervalo_densidades.qml")
+
+# xml_find_all(densidades_poblacionales, ".//symbol")
+categorias <- c(0, 10, 25, 50, 100, 150, 200, 250, Inf)
+escala <- c(
+  "#fff5f0",
+  "#fee0d2",
+  "#fcbba1",
+  "#fc9272",
+  "#fb6a4a",
+  "#ef3b2c",
+  "#cb181d",
+  "#a50f15",
+  "#67000d"
+)
+
+radio_censales <- st_read("www/Radios_censales/Radios_censales.shp") %>%  
+  st_transform(4326)
+
+pal <- colorBin(
+  palette = escala,
+  domain = radio_censales$Den_hab.ha,
+  bins = categorias
+)
 
 # ----------- URL DEL ENDPOINT ----------- #
 

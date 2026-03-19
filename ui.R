@@ -672,6 +672,7 @@ ui <- dashboardPage(
       # ============================================
       # TAB: MAPA
       # ============================================
+      
       bs4TabItem(
         tabName = "map",
         
@@ -718,7 +719,6 @@ ui <- dashboardPage(
           class = "section-title",
           "Base de Datos"
         ),
-        
         fluidRow(
           bs4Card(
             title = "Base de Datos Completa",
@@ -727,8 +727,9 @@ ui <- dashboardPage(
             width = 12,
             maximizable = TRUE,
             downloadButton("descargar_datos", "Descargar CSV (Detalle de plantaciones)", class = "btn-success mb-3"),
-            downloadButton("descargar_datos_crudos", "Descargar CSV (Datos crudo)", class = "btn-success mb-3")
-            
+            downloadButton("descargar_datos_crudos", "Descargar CSV (Datos crudo)", class = "btn-success mb-3"),
+            downloadButton("descargar_informe", "Descargar Informe", class = "btn-success mb-3")
+
           ),
           bs4Card(
             title = "Detalle de plantaciones",
@@ -760,15 +761,24 @@ ui <- dashboardPage(
     
     tags$hr(style = "margin: 16px 20px; border: none; border-top: 2px solid #e8f5e9;"),
     
-    # Selector de sitio
     tags$div(
       style = "padding: 16px 20px;",
+      
       tags$label(
         icon("map-marker-alt", style = "margin-right: 6px;"),
-        "Seleccionar Sitio:",
+        "Seleccionar Sitios:",
         style = "font-weight: 600; color: #2e7d32; margin-bottom: 10px; display: block; font-size: 14px;"
       ),
-      uiOutput("selector_sitio_controlbar")
+      
+      selectizeInput(
+        "filtro_sitio",
+        NULL,
+        choices = NULL,
+        multiple = TRUE,
+        options = list(
+          placeholder = "Seleccionar sitios"
+        )
+      )
     ),
     
     # Selector de especie
@@ -779,9 +789,16 @@ ui <- dashboardPage(
         "Filtrar por Especie:",
         style = "font-weight: 600; color: #2e7d32; margin-bottom: 10px; display: block; font-size: 14px;"
       ),
-      uiOutput("selector_especie_controlbar")
+      selectizeInput(
+        "filtro_especie",
+        NULL,
+        choices = NULL,
+        multiple = TRUE,
+        options = list(
+          placeholder = "Seleccionar especies"
+        )
+      ),
     ),
-    
     # Selector de fecha
     tags$div(
       style = "padding: 16px 20px;",
