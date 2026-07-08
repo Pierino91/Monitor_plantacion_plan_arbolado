@@ -3,175 +3,100 @@ source("global.R")
 function(input, output, session) {
   # Reactive timer para actualización automática
   
-  #### Procesamiento ####
+  #### Carga ####
   
-  auto_update <- reactiveTimer(refrescar_min * 60 * 100)
-  
-  datos_branch <- reactive({
-    
-    auto_update()  # Actualiza cada vez que el timer se activa
-    # Obtener el primer enlace del endpoint
-    tryCatch({
-      first_link <- get_data(endpoint_api)$links$first
-      datos_crudo <- get_all_entries(first_link)
-      
-      # Si no es dataframe o viene vacío, devolvés NULL
-      if (is.null(datos_crudo) || nrow(datos_crudo) == 0) {
-        return(NULL)
-      }
-      
-      return(datos_crudo)
-    }, error = function(e) {
-      # Podrías agregar un log o mensaje interno aquí
-      warning("Error al obtener los datos: ", conditionMessage(e))
-      return(NULL)
-    })
-  })
-  
-  datos_entradas <- reactive({
-    auto_update()  # Actualiza cada vez que el timer se activa
-    # Obtener el primer enlace del endpoint
-    
-    tryCatch({
-      first_link <- get_data(endpoint_api_entrada)$links$first
-      datos_tec <- get_all_entries(first_link)
-      
-      # Si no es dataframe o viene vacío, devolvés NULL
-      if (is.null(datos_tec) || nrow(datos_tec) == 0) {
-        return(NULL)
-      }
-      
-      return(datos_tec)
-    }, error = function(e) {
-      # Podrías agregar un log o mensaje interno aquí
-      warning("Error al obtener los datos: ", conditionMessage(e))
-      return(NULL)
-    })
-  })
-  
-
+  auto_update <- reactiveTimer(REFRESCAR_MIN * 60 * 1000)
   
   plantaciones_arboles_sin_filtro <- reactive({
-    datos_crudo <- datos_branch()
-    datos_tec <- datos_entradas()
-    # # test
-     # datos_crudo <- get_all_entries(endpoint_api)
-     # datos_tec <- get_all_entries(endpoint_api_entrada)
+    auto_update() # Listener del timer reactivo
     
-    
-    if (is.null(datos_crudo)) return(NULL)
-    datos_proc <-
-      datos_crudo %>%
-      merge(datos_tec, by.x ="ec5_branch_owner_uuid", by.y="ec5_uuid"
-      ) %>%
-      rename_with(~ gsub("^\\d+_", "", .x)) %>%
-      rename(
-        latitud = "latitude",
-        longitud = "longitude",
-        especie = "Especie",
-        edad = "Edad_meses",
-        altura = "Altura_cm",
-        foto_plantado = "Foto_del_plantado",
-        obs = "Observacion",
-        origen = "Origen",
-        lugar_especifico = "Tipo_de_intervenc",
-        sitio = "Lugar",
-        otro_sitio ="Si_eligi_otro_siti",
-        fecha_plantado = "Fecha_plantado",
-        agente = "Agente",
-        momento_relevado_arbol = "created_at.x"
-      ) %>%
-      mutate(
-        momento_relevado_arbol = ymd_hms(momento_relevado_arbol, tz = "UTC"),
-        fecha_plantado = ymd(dmy(fecha_plantado, tz = "UTC")),
-        especie = factor(especie),
-        lugar_especifico = factor(lugar_especifico),
-        altura = as.numeric(altura),
-        obs = as.character(obs),
-        latitud = as.numeric(latitud),
-        longitud = as.numeric(longitud)
-      ) %>%
-      arrange(momento_relevado_arbol
-      ) %>%
-      mutate(ID = row_number()
-      )%>%
-      select(agente, sitio, fecha_plantado, latitud, longitud, especie, foto_plantado, lugar_especifico, altura, momento_relevado_arbol, obs,ID)
-    
-    return(datos_proc)
+    withProgress(message = 'Sincronizando datos con Epicollect5...', value = 0.5, {
+      tryCatch({
+        df_sync <- sync_and_merge_epicollect(
+          project_slug = CONSTANTS$PROYECT_SLUG,
+          form_ref     = CONSTANTS$FORM_REF,
+          branch_ref   = CONSTANTS$FORM_REF_BRANCH_REF,
+          dir_entries  = CONSTANTS$DIRECTORY_ENTRIES,
+          dir_branch   = CONSTANTS$DIRECTORY_BRANCH,
+          delimiter    = ","
+        )
+        return(df_sync)
+      }, error = function(e) {
+        warning("Fallo crítico en sincronización maestra: ", e$message)
+        return(NULL)
+      })
+    })
   })
   
-  
 
-  
- 
 #### Control barr #####
-
+# 
 plantaciones_arboles <- reactive({
-    
+
     datos <- plantaciones_arboles_sin_filtro()
     if (is.null(datos)) return(NULL)
-    
+
     # Aplicar filtro de sitio
     if (!is.null(input$filtro_sitio) && !"TODAS" %in% input$filtro_sitio) {
       datos <- datos %>% filter(sitio %in% input$filtro_sitio)
     }
-    
+
     # Aplicar filtro de presencia
     if (!is.null(input$filtro_especie) && !"TODAS" %in% input$filtro_especie) {
             datos <- datos %>% filter(especie %in% input$filtro_especie)
     }
-    
+
     # Aplicar filtro de fecha
     if (!is.null(input$filtro_fecha) &&
         length(input$filtro_fecha) == 2 &&
         !any(is.na(input$filtro_fecha))) {
       datos <- datos %>% filter((fecha_plantado) >= input$filtro_fecha[[1]] &
                                 (fecha_plantado) <= input$filtro_fecha[[2]])
-      
+
     }
-    
+
     return(datos)
   })
 
 
   observe({
-    
+
     req(plantaciones_arboles_sin_filtro())
-    
+
     datos <- plantaciones_arboles_sin_filtro()
-    
+
     updateSelectizeInput(
       session,
       "filtro_sitio",
       choices = c("TODAS", sort(unique(datos$sitio))),
       selected = "TODAS"
     )
-    
+
   })
-  
+
   observe({
-    
+
     req(plantaciones_arboles_sin_filtro())
-    
+
     datos <- plantaciones_arboles_sin_filtro()
     especies <- sort(unique(as.character(datos$especie)))
-    
+
     updateSelectizeInput(
       session,
       "filtro_especie",
       choices = c("TODAS", especies),
       selected = "TODAS"
     )
-    
+
   })
-  
+
   output$selector_fecha_controlbar <- renderUI({
     req(plantaciones_arboles_sin_filtro())
     datos <- plantaciones_arboles_sin_filtro()
-    
+
     fecha_min <- ymd_hms(min(datos$fecha_monitoreo, na.rm = TRUE)) - days(1)
     fecha_max <- ymd_hms(max(datos$fecha_monitoreo, na.rm = TRUE)) + days(1)
-    
+
     dateRangeInput(
       "filtro_fecha",
       label = "",
@@ -182,7 +107,7 @@ plantaciones_arboles <- reactive({
       max = fecha_max
     )
   })
-  
+
 
   output$total_registros_filtrados <- renderUI({
     datos <- plantaciones_arboles()
@@ -317,14 +242,12 @@ plantaciones_arboles <- reactive({
     #   filter(!is.na(fecha_plantado)) |>
     #   group_by(fecha_plantado, especie) |>
     #   reframe(n_especies = n())
-    
+    # print((datos_proc$fecha_plantado))
+
     datos <- 
       datos_proc |>
       mutate(
-        mes = as.Date(
-          paste0("01-", month(fecha_plantado), "-", year(fecha_plantado)),
-          format = "%d-%m-%Y"
-        )
+        mes = floor_date(as.Date(fecha_plantado), "month")
       ) |>
       group_by(
         mes
@@ -341,7 +264,7 @@ plantaciones_arboles <- reactive({
         # mes>as.Date("2025-01-01")
       )
     
-    
+
     if (is.null(datos) || nrow(datos) == 0) {
       plot_ly() |> 
         layout(
@@ -356,11 +279,8 @@ plantaciones_arboles <- reactive({
           yaxis = list(showticklabels = FALSE, zeroline = FALSE)
         )
     } else {
-      plot_ly() |> 
-        # Barras mensuales
+      plot_ly(data = datos, x = ~mes) |>        # Barras mensuales
         add_bars(
-          data = datos,
-          x = ~mes,
           y = ~n,
           marker = list(
             color = "#2e7d32",
@@ -372,8 +292,6 @@ plantaciones_arboles <- reactive({
         ) |>
         # Línea acumulada
         add_lines(
-          data = datos,
-          x = ~mes,
           y = ~acumulado,
           name = "Acumulado",
           line = list(width = 3, color = "#66bb6a"),
@@ -381,8 +299,6 @@ plantaciones_arboles <- reactive({
         ) |>
         # Puntos acumulados
         add_markers(
-          data = datos,
-          x = ~mes,
           y = ~acumulado,
           marker = list(
             size = 6,
@@ -406,6 +322,8 @@ plantaciones_arboles <- reactive({
           plot_bgcolor  = "#e8f5e9",
           xaxis = list(
             title = "Período",
+            type = "date",              
+            tickformat = "%b %Y",      
             showgrid = FALSE,
             zeroline = FALSE,
             tickfont = list(color = "#2c3e50")
@@ -437,14 +355,18 @@ plantaciones_arboles <- reactive({
   
   output$grafico_especie <- renderPlotly({
 
+    datos_esp <- plantaciones_arboles()
     
-    datos_esp <- plantaciones_arboles() %>%
-      count(especie, name = "n") %>%   # más rápido que group_by + summarise
-      arrange(desc(n))
+    shiny::req(datos_esp)
     
-    total <- sum(datos_esp$n)          # se calcula UNA vez
+    if (nrow(datos_esp) == 0) return(NULL)
+
+    total <- nrow(datos_esp)          # se calcula UNA vez
     
-    datos_esp <- datos_esp %>%
+    # más rápido que group_by + summarise
+    datos_esp <- datos_esp  %>%
+      count(especie, name = "n")%>%
+      arrange(desc(n)) %>%
       mutate(
         porcentaje = n / total * 100,
         porcentaje_lbl = sprintf("%.1f%%", porcentaje),
@@ -548,9 +470,11 @@ plantaciones_arboles <- reactive({
     
     if (is.null(datos_proc)) return(NULL)
     # datos_mapa <-
-    datos_proc |>
+    datos_proc <- datos_proc |>
       filter(!is.na(latitud)) |>
       st_as_sf(coords = c("longitud", "latitud"), crs = 4326)
+    
+
   })
   
   output$selector_sitio_mapa <- renderUI({
@@ -558,7 +482,7 @@ plantaciones_arboles <- reactive({
       "sitio_mapa",
       "Elegí un mapa:",
       choices = c("Sitios puntuales", "Estadísticas por sitio", "mapa de densidades", "mapa de calor"),
-      selected = "Sitios puntuales"   # <- opción por defecto
+      selected = "Sitios puntuales"   
     )  })
   
   output$mapa_arboles <- renderLeaflet({
@@ -579,8 +503,7 @@ plantaciones_arboles <- reactive({
         )
       }
       
-      leaflet(datos) %>%
-        
+      leaflet() %>%
         addProviderTiles(providers$CartoDB.Positron, 
                          group = "Base") %>%
         addPolygons(
@@ -595,7 +518,7 @@ plantaciones_arboles <- reactive({
             bringToFront = TRUE
           ),
           group = "VECINALES"
-        )%>%
+        ) %>%
         addPolygons(
           data = UNIDADES_MUNICIPALES,
           color = "#22cbff",
@@ -608,38 +531,40 @@ plantaciones_arboles <- reactive({
             bringToFront = TRUE
           ),
           group = "UNIDADES MUNICIPALES"
-        )%>%
+        ) %>%
         addPolygons(
           data = radio_censales,
-          fillColor = ~pal(Den_hab.ha),
+          # Cambiado 'paleta_graficos' por 'pal' que viene de global.R
+          fillColor = ~paleta_densidad(Den_hab.ha),
           fillOpacity = 0.7,
           color = "#444444",
           weight = 1,
           group = "DENSIDAD POBLACIONAL"
         ) %>%
         addLegend(
-          data = radio_censales,
-          pal = pal,
-          values = ~Den_hab.ha,
+          data = radio_censales,       
+          pal = paleta_densidad,                    
+          values = na.omit(radio_censales$Den_hab.ha), 
           title = "Densidad hab/ha",
           opacity = 0.7,
           group = "DENSIDAD POBLACIONAL"
-        ) %>%
+        ) %>% 
         addCircleMarkers(
-          radius = 1,
-          color = "#4caf50",
-          fillOpacity = 0.7,
-          popup = ~paste0(
-            "ID: ", ID, 
-            "<br>Especie: ", especie,
-            "<br><img src='", foto_plantado,
-            "' width='192' height='256'>"),
-            group = "PLANTACION"
+        data = datos,
+        radius = 1,
+        color = "#4caf50",
+        fillOpacity = 0.7,
+        popup = ~paste0(
+          "<br>Especie: </b> ", especie,
+          "<br><img src='", foto_del_plantado,"' width='192' height='256'>"
+          ),
+        group = "PLANTACION"
         ) %>%
-        addLayersControl(
-          overlayGroups = c("VECINALES", "UNIDADES MUNICIPALES", "PLANTACION", "DENSIDAD POBLACIONAL"),
-          options = layersControlOptions(collapsed = FALSE)
-        )
+      addLayersControl(
+        overlayGroups = c("VECINALES", "UNIDADES MUNICIPALES", "PLANTACION", "DENSIDAD POBLACIONAL"),
+        options = layersControlOptions(collapsed = FALSE)
+      )
+      
     } else if (input$sitio_mapa == "Estadísticas por sitio") {
       
       if (is.null(datos) || nrow(datos) == 0) {
@@ -685,7 +610,7 @@ plantaciones_arboles <- reactive({
       
       n_especies <- length(labels_especies)
       
-      # Crear paleta sin errores
+      # Crear paleta sin errores (Arreglado Set3 dinámico)
       if (!is.numeric(n_especies) || n_especies == 0) {
         paleta <- "#CCCCCC"
       } else if (n_especies <= 12) {
@@ -706,7 +631,7 @@ plantaciones_arboles <- reactive({
           colorPalette = paleta,
           width = 70
         )
-    }else if (input$sitio_mapa == "mapa de calor") {
+    } else if (input$sitio_mapa == "mapa de calor") {
       
       if (is.null(datos) || nrow(datos) == 0) {
         return(
@@ -715,8 +640,6 @@ plantaciones_arboles <- reactive({
             addPopups(lng = 0, lat = 0, popup = "Sin datos georreferenciados")
         )
       }
-      
-      # Agrupar datos
       
       leaflet(datos) %>%
         addProviderTiles(providers$CartoDB.Positron) %>%
@@ -733,7 +656,6 @@ plantaciones_arboles <- reactive({
           ),
           group = "UNIDADES MUNICIPALES"
         ) %>%
-        
         addPolygons(
           data = VECINALES,
           color = "#ff5722",
@@ -771,7 +693,7 @@ plantaciones_arboles <- reactive({
         addLegend(
           data = radio_censales,
           pal = pal,
-          values = ~Den_hab.ha,
+          values = radio_censales$Den_hab.ha, # Cambiado aquí también por estabilidad
           title = "Densidad hab/ha",
           opacity = 0.5,
           group = "DENSIDAD POBLACIONAL"
@@ -780,8 +702,8 @@ plantaciones_arboles <- reactive({
           overlayGroups = c("VECINALES", "UNIDADES MUNICIPALES","MAPA DE CALOR", "DENSIDAD POBLACIONAL"),
           options = layersControlOptions(collapsed = FALSE)
         )
-
-    }else  if (input$sitio_mapa == "mapa de densidades") {
+      
+    } else if (input$sitio_mapa == "mapa de densidades") {
       
       if (is.null(datos) || nrow(datos) == 0) {
         return(
@@ -790,8 +712,6 @@ plantaciones_arboles <- reactive({
             addPopups(lng = 0, lat = 0, popup = "Sin datos georreferenciados")
         )
       }
-      
-      # Agrupar datos
       
       leaflet(datos) %>%
         addProviderTiles(providers$CartoDB.Positron) %>%
@@ -839,7 +759,7 @@ plantaciones_arboles <- reactive({
         addLegend(
           data = radio_censales,
           pal = pal,
-          values = ~Den_hab.ha,
+          values = radio_censales$Den_hab.ha, # Cambiado aquí también por estabilidad
           title = "Densidad hab/ha",
           opacity = 0.7,
           group = "DENSIDAD POBLACIONAL"
@@ -848,11 +768,8 @@ plantaciones_arboles <- reactive({
           overlayGroups = c("VECINALES", "DENSIDAD DE ARBOLES", "UNIDADES MUNICIPALES", "DENSIDAD POBLACIONAL"),
           options = layersControlOptions(collapsed = FALSE)
         )
-      
     }  
-    
-  })
-  
+  })  
   index <- reactiveVal(1)
   
   # Botones Previous / Next
@@ -889,20 +806,20 @@ plantaciones_arboles <- reactive({
       # datos_limpios %>%
       slice(index())%>%
       # slice(1)%>%
-      select(foto_plantado, especie, sitio) 
+      select(foto_del_plantado, especie, sitio) 
     
     # .[index()]
     
-    tags$img(src = imgs$foto_plantado, width = "720", height = "1280", alt = "Foto de árbol")
+    tags$img(src = imgs$foto_del_plantado, width = "720", height = "1280", alt = "Foto de árbol")
     
     tagList(
       tags$h4(imgs$especie),  # título o texto informativo
       tags$h3(imgs$sitio),  # título o texto informativo
-      tags$img(src = imgs$foto_plantado, width = "100%", style = "max-width: 500px;")
+      tags$img(src = imgs$foto_del_plantado, width = "100%", style = "max-width: 500px;")
     )
     # # test
     #  x <- imgs %>%
-    #    pull(foto_plantado) %>%
+    #    pull(foto_del_plantado) %>%
     #    .[1]
     
   })
@@ -916,39 +833,34 @@ plantaciones_arboles <- reactive({
 
 output$descargar_datos <- downloadHandler(
     filename = function() {
-      paste0("arbolado_", Sys.Date(), ".xls")
+      paste0("arbolado_", Sys.Date(), ".csv")
     },
     content = function(file) {
       datos_sf <- data_mapa_arboles()
       
       if (!inherits(datos_sf, "sf")) {
-        write.xlsx(datos_sf, file, rowNames = FALSE)
+        write.csv(datos_sf, file, row.names = FALSE)
       } else {
         datos <- cbind(st_drop_geometry(datos_sf), st_coordinates(datos_sf)) %>%
-          rename(longitud = X, latitud = Y)
-        write.xlsx(datos, file, rowNames = FALSE)
+          rename(longitud = X, latitud = Y) %>%
+          select(-localizacion_del_)
+        
+        write.csv(datos, file, row.names = FALSE)
       }
     }
   )
   
+
   output$descargar_datos_crudos <- downloadHandler(
+
     filename = function() {
-      paste0("arbolado_", Sys.Date(), ".xls")
+      paste0("arbolado_", Sys.Date(), ".csv")
     },
     content = function(file) {
-      datos <- plantaciones_arboles()
-      write.xlsx(datos, file, rowNames = FALSE)
-    }
-  )
-  
-  
-  output$descargar_datos_crudos <- downloadHandler(
-    filename = function() {
-      paste0("arbolado_", Sys.Date(), ".xls")
-    },
-    content = function(file) {
-      datos <- plantaciones_arboles()
-      write.xlsx(datos, file, rowNames = FALSE)
+      datos <- plantaciones_arboles() %>% select(-localizacion_del_)
+      # cat(names(datos))
+      # str(datos)
+      write.csv(datos, file, row.names = FALSE)
     }
   )
   
