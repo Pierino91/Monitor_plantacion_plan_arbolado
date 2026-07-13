@@ -842,8 +842,8 @@ output$descargar_datos <- downloadHandler(
         write.csv(datos_sf, file, row.names = FALSE)
       } else {
         datos <- cbind(st_drop_geometry(datos_sf), st_coordinates(datos_sf)) %>%
-          rename(longitud = X, latitud = Y) %>%
-          select(-localizacion_del_)
+          rename(longitud = X, latitud = Y) 
+          # select(-localizacion_del_)
         
         write.csv(datos, file, row.names = FALSE)
       }
@@ -857,7 +857,8 @@ output$descargar_datos <- downloadHandler(
       paste0("arbolado_", Sys.Date(), ".csv")
     },
     content = function(file) {
-      datos <- plantaciones_arboles() %>% select(-localizacion_del_)
+      datos <- plantaciones_arboles() 
+      # %>% select(-localizacion_del_)
       # cat(names(datos))
       # str(datos)
       write.csv(datos, file, row.names = FALSE)
