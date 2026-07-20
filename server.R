@@ -610,302 +610,89 @@ if (input$sitio_mapa == "Sitios puntuales") {
   })
   
   output$mapa_arboles <- renderLeaflet({
-    req(data_mapa_arboles())
+    req(data_mapa_arboles(), input$sitio_mapa)
     datos <- data_mapa_arboles()
-
-    message("Mapa, str_crs")
-    message(st_crs(datos))
-    message("Mapa, tipo de datos")
-    message(class(datos))
-    message("Mapa, georeferenciacion correcta")
-    message(st_bbox(datos))
-    message("Mapa, head(st_coordinates(datos))")
-    message(head(st_coordinates(datos)))
-
-
-
-    # Si input$sitio_mapa no está todavía disponible, salimos sin error
-    if (is.null(input$sitio_mapa)) return(leaflet() %>% addTiles())
-
+    
+    # 1. Validaciones defensivas de entrada comunes
+    if (is.null(datos) || nrow(datos) == 0) {
+      return(
+        leaflet() %>%
+          addProviderTiles(providers$CartoDB.Positron) %>%
+          addPopups(lng = -60.50, lat = -31.75, popup = "Sin datos georreferenciados")
+      )
+    }
+    
+    # 2. Inicialización de paleta compartida estándar
+    paleta_graficos <- colorNumeric(
+      palette = RColorBrewer::brewer.pal(8, "Set2"),
+      domain = radio_censales$Den_hab.ha,
+      na.color = "transparent"
+    )
+    
+    # 3. Control de renderizado por tipo de mapa elegido
     if (input$sitio_mapa == "Sitios puntuales") {
       
-      if (is.null(datos) || nrow(datos) == 0) {
-        return(
-          leaflet() %>%
-            addProviderTiles(providers$CartoDB.Positron) %>%
-            addPopups(
-              lng = -60.50,
-              lat = -31.75,
-              popup = "Sin datos georreferenciados"
-            )
-        )
-      }
-      
       leaflet(datos) %>%
-        
-        addProviderTiles(
-          providers$CartoDB.Positron,
-          group = "Base"
-        ) %>%
-        
-        addPolygons(
-          data = VECINALES,
-          color = "#ff5722",
-          weight = 1,
-          fillOpacity = 0.25,
-          popup = ~paste0("<b>Vecinal:</b> ", nombre),
-          group = "VECINALES"
-        ) %>%
-        
-        addPolygons(
-          data = UNIDADES_MUNICIPALES,
-          color = "#22cbff",
-          weight = 1,
-          fillOpacity = 0.25,
-          popup = ~paste0("<b>Unidad:</b> ", nombre),
-          group = "UNIDADES MUNICIPALES"
-        ) %>%
-        
-        addPolygons(
-          data = radio_censales,
-          fillColor = ~paleta_densidad(Den_hab.ha),
-          fillOpacity = 0.5,
-          color = "#444444",
-          weight = 1,
-          group = "DENSIDAD POBLACIONAL"
-        ) %>%
-        
+        add_base_layers(radio_censales, paleta_graficos) %>%
         addCircleMarkers(
-          data = datos,
-          radius = 5,
-          stroke = TRUE,
-          weight = 1,
-          color = "#2E7D32",
-          fillColor = "#4CAF50",
-          fillOpacity = 0.8,
-          popup = ~paste0(
-            "<b>Especie:</b> ", especie,
-            "<br><img src='", foto_del_plantado,
-            "' width='192'>"
-          ),
+          radius = 5, weight = 1, stroke = TRUE,
+          color = "#2E7D32", fillColor = "#4CAF50", fillOpacity = 0.8,
+          popup = ~paste0("<b>Especie:</b> ", especie, "<br><img src='", foto_del_plantado, "' width='192'>"),
           group = "PLANTACION"
         ) %>%
-        
-        addLegend(
-          pal = paleta_densidad,
-          values = na.omit(radio_censales$Den_hab.ha),
-          title = "Densidad hab/ha",
-          opacity = 0.7
-        ) %>%
-        
         addLayersControl(
-          overlayGroups = c(
-            "VECINALES",
-            "UNIDADES MUNICIPALES",
-            "PLANTACION",
-            "DENSIDAD POBLACIONAL"
-          ),
-          options = layersControlOptions(
-            collapsed = FALSE
-          )
-        ) } else if (input$sitio_mapa == "Estadísticas por sitio") {
-
-      if (is.null(datos) || nrow(datos) == 0) {
-        return(
-          leaflet() %>%
-            addProviderTiles(providers$CartoDB.Positron) %>%
-            addPopups(lng = 0, lat = 0, popup = "Sin datos georreferenciados")
+          overlayGroups = c("VECINALES", "UNIDADES MUNICIPALES", "PLANTACION", "DENSIDAD POBLACIONAL"),
+          options = layersControlOptions(collapsed = FALSE)
         )
-      }
-
-      # Agrupar datos
-      chartdata <- datos %>%
-        st_drop_geometry() %>%
-        group_by(sitio, especie) %>%
-        summarise(cantidad = n(), .groups = "drop_last") %>%
-        tidyr::pivot_wider(
-          names_from = especie,
-          values_from = cantidad,
-          values_fill = 0
-        ) %>%
-        left_join(
-          datos %>%
-            mutate(
-              lng = st_coordinates(geometry)[, 1],
-              lat = st_coordinates(geometry)[, 2]
-            ) %>%
-            st_drop_geometry() %>%
-            group_by(sitio) %>%
-            summarise(
-              lng = mean(lng, na.rm = TRUE),
-              lat = mean(lat, na.rm = TRUE),
-              .groups = "drop"
-            ),
-          by = "sitio"
-        )
-
-      # Identificar columnas de especies
+      
+    } else if (input$sitio_mapa == "Estadísticas por sitio") {
+      
+      chartdata <- prepare_chart_data(datos)
       labels_especies <- names(chartdata)[!(names(chartdata) %in% c("sitio", "lng", "lat"))]
+      
       if (length(labels_especies) == 0) {
         labels_especies <- "Sin_datos"
         chartdata$Sin_datos <- 1
       }
-
+      
+      # Paleta dinámica segura para las variables de los gráficos circulares
       n_especies <- length(labels_especies)
-
-      # Crear paleta sin errores (Arreglado Set3 dinámico)
-      if (!is.numeric(n_especies) || n_especies == 0) {
-        paleta <- "#CCCCCC"
-      } else if (n_especies <= 12) {
-        paleta <- RColorBrewer::brewer.pal(max(3, n_especies), "Set3")[seq_len(n_especies)]
+      paleta_pie <- if (n_especies <= 12) {
+        RColorBrewer::brewer.pal(max(3, n_especies), "Set3")[seq_len(n_especies)]
       } else {
-        paleta <- colorRampPalette(RColorBrewer::brewer.pal(12, "Set3"))(n_especies)
+        colorRampPalette(RColorBrewer::brewer.pal(12, "Set3"))(n_especies)
       }
-
-      paleta[is.na(paleta)] <- grDevices::rainbow(sum(is.na(paleta)))
-
+      paleta_pie[is.na(paleta_pie)] <- grDevices::rainbow(sum(is.na(paleta_pie)))
+      
       leaflet(chartdata) %>%
         addProviderTiles(providers$CartoDB.Positron) %>%
         addMinicharts(
-          lng = chartdata$lng,
-          lat = chartdata$lat,
+          lng = chartdata$lng, lat = chartdata$lat,
           chartdata = chartdata[, labels_especies],
-          type = "pie",
-          colorPalette = paleta,
-          width = 70
+          type = "pie", colorPalette = paleta_pie, width = 70
         )
+      
     } else if (input$sitio_mapa == "mapa de calor") {
-
-      if (is.null(datos) || nrow(datos) == 0) {
-        return(
-          leaflet() %>%
-            addProviderTiles(providers$CartoDB.Positron) %>%
-            addPopups(lng = 0, lat = 0, popup = "Sin datos georreferenciados")
-        )
-      }
-
+      
       leaflet(datos) %>%
-        addProviderTiles(providers$CartoDB.Positron) %>%
-        addPolygons(
-          data = UNIDADES_MUNICIPALES,
-          color = "#22cbff",
-          weight = 1,
-          fillOpacity = 0.25,
-          popup = ~paste0("<b>Unidades municipales:</b> ", nombre),
-          highlightOptions = highlightOptions(
-            weight = 3,
-            color = "#225cff",
-            bringToFront = TRUE
-          ),
-          group = "UNIDADES MUNICIPALES"
-        ) %>%
-        addPolygons(
-          data = VECINALES,
-          color = "#ff5722",
-          weight = 1,
-          fillOpacity = 0.25,
-          popup = ~paste0("<b>Vecinal:</b> ", nombre),
-          highlightOptions = highlightOptions(
-            weight = 3,
-            color = "#ff9800",
-            bringToFront = TRUE
-          ),
-          group = "VECINALES"
-        ) %>%
+        add_base_layers(radio_censales, paleta_graficos) %>%
         addHeatmap(
-          blur = 20,
-          max = 0.05,
-          radius = 10,   # radio fijo en pixeles
-          gradient = c(
-            "0.2" = "blue",
-            "0.4" = "cyan",
-            "0.6" = "yellow",
-            "0.8" = "#C6CE00",
-            "1.0" = "green"
-          ),
+          blur = 20, max = 0.05, radius = 10,
+          gradient = c("0.2" = "blue", "0.4" = "cyan", "0.6" = "yellow", "0.8" = "#C6CE00", "1.0" = "green"),
           group = "MAPA DE CALOR"
         ) %>%
-        addPolygons(
-          data = radio_censales,
-          fillColor = ~pal(Den_hab.ha),
-          fillOpacity = 0.5,
-          color = "#444444",
-          weight = 1,
-          group = "DENSIDAD POBLACIONAL"
-        ) %>%
-        addLegend(
-          data = radio_censales,
-          pal = pal,
-          values = radio_censales$Den_hab.ha, # Cambiado aquí también por estabilidad
-          title = "Densidad hab/ha",
-          opacity = 0.5,
-          group = "DENSIDAD POBLACIONAL"
-        ) %>%
         addLayersControl(
-          overlayGroups = c("VECINALES", "UNIDADES MUNICIPALES","MAPA DE CALOR", "DENSIDAD POBLACIONAL"),
+          overlayGroups = c("VECINALES", "UNIDADES MUNICIPALES", "MAPA DE CALOR", "DENSIDAD POBLACIONAL"),
           options = layersControlOptions(collapsed = FALSE)
         )
-
+      
     } else if (input$sitio_mapa == "mapa de densidades") {
-
-      if (is.null(datos) || nrow(datos) == 0) {
-        return(
-          leaflet() %>%
-            addProviderTiles(providers$CartoDB.Positron) %>%
-            addPopups(lng = 0, lat = 0, popup = "Sin datos georreferenciados")
-        )
-      }
-
+      
       leaflet(datos) %>%
-        addProviderTiles(providers$CartoDB.Positron) %>%
+        add_base_layers(radio_censales, paleta_graficos) %>%
         addCircles(
-          radius = 10,
-          stroke = FALSE,
-          color = "#008f39",
-          fillOpacity = 0.4,
+          radius = 10, stroke = FALSE, color = "#008f39", fillOpacity = 0.4,
           group = "DENSIDAD DE ARBOLES"
-        ) %>%
-        addPolygons(
-          data = UNIDADES_MUNICIPALES,
-          color = "#22cbff",
-          weight = 1,
-          fillOpacity = 0.25,
-          popup = ~paste0("<b>Unidades municipales:</b> ", nombre),
-          highlightOptions = highlightOptions(
-            weight = 3,
-            color = "#225cff",
-            bringToFront = TRUE
-          ),
-          group = "UNIDADES MUNICIPALES"
-        ) %>%
-        addPolygons(
-          data = VECINALES,
-          color = "#ff5722",
-          weight = 1,
-          fillOpacity = 0.25,
-          popup = ~paste0("<b>Vecinal:</b> ", nombre),
-          highlightOptions = highlightOptions(
-            weight = 3,
-            color = "#ff9800",
-            bringToFront = TRUE
-          ),
-          group = "VECINALES"
-        ) %>%
-        addPolygons(
-          data = radio_censales,
-          fillColor = ~pal(Den_hab.ha),
-          fillOpacity = 0.7,
-          color = "#444444",
-          weight = 1,
-          group = "DENSIDAD POBLACIONAL"
-        ) %>%
-        addLegend(
-          data = radio_censales,
-          pal = pal,
-          values = radio_censales$Den_hab.ha, # Cambiado aquí también por estabilidad
-          title = "Densidad hab/ha",
-          opacity = 0.7,
-          group = "DENSIDAD POBLACIONAL"
         ) %>%
         addLayersControl(
           overlayGroups = c("VECINALES", "DENSIDAD DE ARBOLES", "UNIDADES MUNICIPALES", "DENSIDAD POBLACIONAL"),
@@ -1010,6 +797,7 @@ output$descargar_datos <- downloadHandler(
   )
   
   output$descargar_informe <- downloadHandler(
+    
     # req(plantaciones_arboles(), data_mapa_arboles(), VECINALES)
     # message(glue("Hello"))
 

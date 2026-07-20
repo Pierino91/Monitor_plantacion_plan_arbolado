@@ -5,6 +5,7 @@ library(bs4Dash)
 library(shinyWidgets)
 library(leaflet)
 library(leaflet.extras)
+library(leaflet.minicharts)
 library(sf)
 library(dplyr)
 library(reactable)
@@ -12,6 +13,7 @@ library(ggplot2)
 library(plotly)
 library(lubridate)
 library(openxlsx)
+
 
 
 # Inyección de Capas Arquitectónicas

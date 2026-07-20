@@ -59,9 +59,9 @@ datos <- params$datos
 total_arboles <- nrow(datos)
 fecha_inicio <- min(datos$fecha_plantado, na.rm = TRUE)
 fecha_fin <- max(datos$fecha_plantado, na.rm = TRUE)
-sitios_unicos <- n_distinct(datos$sitio)
+lugar_especifico <- n_distinct(datos$sitio)
 especies_registradas <- n_distinct(datos$especie)
-altura_promedio <- round(mean(datos$altura, na.rm = TRUE), 1)
+
 ```
 ```{r datos_mapa}
 
@@ -88,9 +88,8 @@ El documento presenta los siguientes aspectos principales: planificación y ejec
 
 - **Total de árboles plantados:** `r format(total_arboles, big.mark = ".")`
 - **Período analizado:** `r format(fecha_inicio, '%d/%m/%Y')` al `r format(fecha_fin, '%d/%m/%Y')`
-- **Sitios de intervención:** `r sitios_unicos` ubicaciones
+- **Sitios de intervención:** `r lugar_especifico` ubicaciones
 - **Especies utilizadas:** `r especies_registradas` especies diferentes
-- **Altura promedio de plantación:** `r altura_promedio` cm
 
 
 
@@ -100,7 +99,7 @@ El documento presenta los siguientes aspectos principales: planificación y ejec
 
 ## Distribución de plantaciones por sitio
 
-Se realizaron intervenciones en **`r sitios_unicos` sitios** diferentes, alcanzando espacios públicos y sectores de alineación.
+Se realizaron intervenciones en **`r lugar_especifico` sitios** diferentes, alcanzando espacios públicos y sectores de alineación.
 
 ```{r tabla_sitios}
 tabla_sitios <- datos %>%
@@ -108,8 +107,7 @@ tabla_sitios <- datos %>%
   summarise(
     `Cantidad` = n(),
     `Porcentaje [%]` = round(n()/total_arboles*100, 2),
-    `Especies` = n_distinct(especie),
-    `Altura prom. (cm)` = round(mean(altura, na.rm = TRUE), 1)
+    `Especies` = n_distinct(especie)
   ) %>%
   arrange(desc(Cantidad)
   )%>%
@@ -189,7 +187,7 @@ ggplot(datos_mensuales) +
     caption = "La línea azul representa el total acumulado"
   ) +
   theme_minimal() +
-  scale_x_date(labels = date_format("%b/%Y"), date_breaks = "1 month")+
+  scale_x_date(labels = date_format("%b/%Y"), date_breaks = "2 month")+
   theme(
     plot.title = element_text(face = "bold", size = 13),
 
@@ -219,8 +217,6 @@ tabla_especies <- datos %>%
   summarise(
     `Cantidad` = n(),
     `Porcentaje` = paste0(round(n() / total_arboles * 100, 1), "%"),
-    `Altura prom. (cm)` = round(mean(altura, na.rm = TRUE), 1),
-    `Altura máx. (cm)` = max(altura, na.rm = TRUE),
     `Sitios` = n_distinct(sitio)
   ) %>%
   arrange(desc(Cantidad))%>%
@@ -269,12 +265,11 @@ datos %>%
 
 ```{r tabla_intervencion}
 tabla_intervencion <- datos %>%
-  group_by(lugar_especifico) %>%
+  group_by(sitio) %>%
   summarise(
     `Cantidad` = n(),
     `Porcentaje` = paste0(round(n() / total_arboles * 100, 1), "%"),
     `Especies` = n_distinct(especie),
-    `Altura prom. (cm)` = round(mean(altura, na.rm = TRUE), 1)
   ) %>%
   arrange(desc(Cantidad))
 
@@ -282,59 +277,6 @@ kable(tabla_intervencion,
       caption = "Distribución por tipo de intervención",
       booktabs = TRUE,
       align = c('l', 'r', 'r', 'r', 'r'))
-```
-
-\newpage
-
-# Análisis por vecinales
-
-## Cantidad de individuos
-
-Se han intevenido en alrededor de  
-
-
-
-# Análisis de Desarrollo de los individuos
-
-## Estadísticas de altura
-
-El monitoreo de la altura de los ejemplares plantados permite evaluar las condiciones iniciales de las plantaciones y su potencial de desarrollo futuro.
-
-```{r tabla_altura}
-altura_stats <- datos %>%
-  summarise(
-    `Altura promedio (cm)` = round(mean(altura, na.rm = TRUE), 1),
-    `Altura mediana (cm)` = round(median(altura, na.rm = TRUE), 1),
-    `Altura mínima (cm)` = min(altura, na.rm = TRUE),
-    `Altura máxima (cm)` = max(altura, na.rm = TRUE),
-    `Desviación estándar (cm)` = round(sd(altura, na.rm = TRUE), 1)
-  )
-
-kable(t(altura_stats), 
-      caption = "Estadísticas de altura de los ejemplares plantados",
-      col.names = c("Valor"),
-      booktabs = TRUE)
-```
-
-\vspace{0.5cm}
-
-```{r grafico_altura, fig.width=10, fig.height=5, fig.cap="Distribución de alturas de los ejemplares plantados"}
-ggplot(datos, aes(x = altura)) +
-  geom_histogram(bins = 30, fill = "#2E7D32", color = "white", alpha = 0.8) +
-  geom_vline(aes(xintercept = mean(altura, na.rm = TRUE)), 
-             color = "#D32F2F", linetype = "dashed", size = 1) +
-  annotate("text", 
-           x = mean(datos$altura, na.rm = TRUE) + 20, 
-           y = Inf, 
-           label = paste("Media:", round(mean(datos$altura, na.rm = TRUE), 1), "cm"),
-           vjust = 1.5, color = "#D32F2F", fontface = "bold") +
-  labs(
-    title = "Distribución de alturas de los ejemplares al momento de plantación",
-    x = "Altura (cm)",
-    y = "Frecuencia"
-  ) +
-  theme_minimal() +
-  theme(plot.title = element_text(face = "bold", size = 13))
 ```
 
 \newpage
@@ -403,9 +345,7 @@ Durante el período analizado se han alcanzado los siguientes hitos:
 
 - El sitio con mayor cantidad de plantaciones fue **`r tabla_sitios$sitio[1]`** con `r tabla_sitios$Cantidad[1]` árboles.
 
-- Se trabajó en **`r sitios_unicos` sitios diferentes**, priorizando la formación de corredores y agrupaciones de escala.
-
-- La altura promedio de plantación fue de **`r altura_promedio` cm**, lo que indica ejemplares de buen porte inicial.
+- Se trabajó en **`r lugar_especifico` sitios diferentes**, priorizando la formación de corredores y agrupaciones de escala.
 
 - Se utilizaron **`r especies_registradas` especies diferentes**, promoviendo la diversidad del arbolado urbano.
 
